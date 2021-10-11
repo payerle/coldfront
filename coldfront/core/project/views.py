@@ -19,6 +19,7 @@ from django.views import View
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 from django.views.generic.base import TemplateView
 from django.views.generic.edit import FormView
+from django.contrib.admin.widgets import FilteredSelectMultiple
 
 from coldfront.core.allocation.models import (Allocation,
                                               AllocationStatusChoice,
@@ -32,6 +33,7 @@ from coldfront.core.project.forms import (ProjectAddUserForm,
                                           ProjectRemoveUserForm,
                                           ProjectReviewEmailForm,
                                           ProjectReviewForm, ProjectSearchForm,
+                                          #ProjectUpdateForm,
                                           ProjectUserUpdateForm)
 from coldfront.core.project.models import (Project, ProjectReview,
                                            ProjectReviewStatusChoice,
@@ -44,6 +46,7 @@ from coldfront.core.user.forms import UserSearchForm
 from coldfront.core.user.utils import CombinedUserSearch
 from coldfront.core.utils.common import get_domain_url, import_from_settings
 from coldfront.core.utils.mail import send_email, send_email_template
+from coldfront.core.organization.models import Organization
 
 EMAIL_ENABLED = import_from_settings('EMAIL_ENABLED', False)
 ALLOCATION_ENABLE_ALLOCATION_RENEWAL = import_from_settings(
@@ -444,7 +447,7 @@ class ProjectCreateView(LoginRequiredMixin, UserPassesTestMixin, CreateView):
 class ProjectUpdateView(SuccessMessageMixin, LoginRequiredMixin, UserPassesTestMixin, UpdateView):
     model = Project
     template_name_suffix = '_update_form'
-    fields = ['title', 'description', 'field_of_science', ]
+    fields = ['title', 'description', 'field_of_science', 'organizations' ]
     success_message = 'Project updated.'
 
     def test_func(self):
@@ -471,6 +474,13 @@ class ProjectUpdateView(SuccessMessageMixin, LoginRequiredMixin, UserPassesTestM
     def get_success_url(self):
         return reverse('project-detail', kwargs={'pk': self.object.pk})
 
+    def get_form(self, form_class=None):
+        form = super(ProjectUpdateView, self).get_form(form_class)
+        # Restrict organization choices in ProjectUpdate form to those
+        # with is_selectable_for_project set
+        form.fields["organizations"].queryset = \
+            Organization.objects.filter(is_selectable_for_project=True)
+        return form
 
 class ProjectAddUsersSearchView(LoginRequiredMixin, UserPassesTestMixin, TemplateView):
     template_name = 'project/project_add_users.html'

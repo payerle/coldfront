@@ -10,6 +10,7 @@ from simple_history.models import HistoricalRecords
 
 from coldfront.core.field_of_science.models import FieldOfScience
 from coldfront.core.utils.common import import_from_settings
+from coldfront.core.organization.models import Organization
 
 PROJECT_ENABLE_PROJECT_REVIEW = import_from_settings('PROJECT_ENABLE_PROJECT_REVIEW', False)
 
@@ -46,6 +47,8 @@ We do not have information about your research. Please provide a detailed descri
     force_review = models.BooleanField(default=False)
     requires_review = models.BooleanField(default=True)
     history = HistoricalRecords()
+    organizations = models.ManyToManyField(Organization,
+            related_name='projects',)
 
     def clean(self):
         if 'Auto-Import Project'.lower() in self.title.lower():
@@ -110,6 +113,14 @@ We do not have information about your research. Please provide a detailed descri
 
     def __str__(self):
         return self.title
+
+    def selectable_organizations(self):
+        """Returns organizations with is_selectable_project set.
+
+        For filtering stuff in templates.
+        """
+        return Organization.objects.filter(projects=self,
+                is_selectable_for_project=True)
 
     class Meta:
         ordering = ['title']

@@ -29,6 +29,16 @@ User Profile{% if not user == viewed_user %}: {{ viewed_user.username }}{% endif
             <td>{{group_list}}</td>
           </tr>
           <tr>
+            <th scope="row" nowrap>Department(s):</th>
+	    <td>{% for dept in viewed_user.userprofile.selectable_organizations %}
+		    {% if not forloop.first %} <br> {% endif %}
+		    {{ dept.semifullcode }}
+		{% empty %}
+		    No departments found.
+		{% endfor %}
+	    </td>
+          </tr>
+          <tr>
             <th scope="row">Email:</th>
             <td>{{viewed_user.email}}</td>
           </tr>

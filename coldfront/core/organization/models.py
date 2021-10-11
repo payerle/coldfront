@@ -1,8 +1,10 @@
+import sys
+
 from django.db import models
 from model_utils.models import TimeStampedModel
 from django.core.exceptions import ValidationError
-from django.db.models import Max
-
+from django.core.validators import RegexValidator
+from django.db.models import Q
 
 class OrganizationLevel(TimeStampedModel):
     """This defines the different organization levels.
@@ -20,10 +22,22 @@ class OrganizationLevel(TimeStampedModel):
     levels should reference the unique entry at the next highest level.
     """
 
-    name = models.CharField(max_length=512, null=True, blank=False, unique=True)
-    level = models.IntegerField(null=False, blank=False, unique=True,
-            help_text='The lower this value, the higher this type is in the organization.')
-    parent = models.OneToOneField('self', on_delete=models.CASCADE, null=True, blank=True)
+    name = models.CharField(
+            max_length=512, 
+            null=True, 
+            blank=False, 
+            unique=True)
+    level = models.IntegerField(
+            null=False, 
+            blank=False, 
+            unique=True,
+            help_text='The lower this value, the higher this type is in '
+                'the organization.')
+    parent = models.OneToOneField(
+            'self', 
+            on_delete=models.CASCADE, 
+            null=True, 
+            blank=True)
 
     def __str__(self):
         return self.name
@@ -43,8 +57,11 @@ class OrganizationLevel(TimeStampedModel):
             plevel = self.parent.level
             if plevel <= self.level:
                 raise ValidationError( 'OrganizationLevel {}, level={} '
-                    'has parent {} with lower level {}\n' .format(self, self.level,
-                        self.parent, plevel))
+                    'has parent {} with lower level {}\n' .format(
+                        self, 
+                        self.level,
+                        self.parent, 
+                        plevel))
         else:
             # No parent, make sure we are the highest level in table
             count = OrganizationLevel.objects.count()
@@ -73,11 +90,51 @@ class Organization(TimeStampedModel):
     parent which belongs to a higher organizational level.
     """
     
-    parent = models.ForeignKey('self', on_delete=models.CASCADE, null=True, blank=True)
-    organization_level = models.ForeignKey(OrganizationLevel, on_delete=models.CASCADE, null=False)
-    code = models.CharField(max_length=512, null=True, blank=False, unique=True)
-    shortname = models.CharField(max_length=1024, null=True, blank=False, unique=True)
-    longname = models.CharField(max_length=2048, null=True, blank=False, unique=True)
+    parent = models.ForeignKey(
+            'self', 
+            on_delete=models.CASCADE, 
+            null=True, 
+            blank=True)
+    organization_level = models.ForeignKey(
+            OrganizationLevel, 
+            on_delete=models.CASCADE, 
+            null=False)
+    code = models.CharField(
+            max_length=512, 
+            null=True, 
+            blank=False, 
+            unique=True,
+            help_text='A short code for referencing this organization.  '
+                'Typically will be combined with short codes from all parents '
+                'to get an unique reference. May not contain hyphen (-)',
+            validators=[
+                RegexValidator(
+                    regex='-',
+                    message='Code field may not contain hyphen (-)',
+                    inverse_match=True,)
+                ])
+    shortname = models.CharField(
+            max_length=1024, 
+            null=True, 
+            blank=False, 
+            unique=True,
+            help_text='A medium length name for this organization, used '
+                'in many displays.')
+    longname = models.CharField(
+            max_length=2048, 
+            null=True, 
+            blank=False, 
+            unique=True,
+            help_text='The full name for this organization, for official '
+                'contexts')
+    is_selectable_for_user = models.BooleanField(
+            default=True,
+            help_text='This organization can be selected for Users')
+    is_selectable_for_project = models.BooleanField(
+            default=True,
+            help_text='This organization can be selected for Projects')
+
+
 
     def __str__(self):
         return self.shortname
@@ -96,11 +153,8 @@ class Organization(TimeStampedModel):
         # Call base class's clean()
         super().clean()
 
-        import sys
-        sys.stderr.write('[TPTEST] starting Organization clean()\n')
         # Get orglevel and orglevel's parent
         orglevel_obj = self.organization_level
-        sys.stderr.write('[TPTEST] orglevel_obj is {}\n'.format(repr(orglevel_obj)))
         orglevel = orglevel_obj.level
         orglevel_parent = orglevel_obj.parent
 
@@ -136,7 +190,20 @@ class Organization(TimeStampedModel):
     def save(self, *args, **kwargs):
         """Override save() to call full_clean first"""
         self.full_clean()
-        return super(OrganizationLevel, self).save(*args, **kwargs)
+        return super(Organization, self).save(*args, **kwargs)
+
+    def ancestors(self):
+        """Returns of list ref of all ancestors.
+
+        Returns a list like [grandparent, parent]
+        Returns empty list if no parent, otherwise returns the
+        parent's ancestors() with parent appended.
+        """
+        retval = []
+        if self.parent:
+            retval = self.parent.ancestors()
+            retval.append(parent)
+        return retval
                 
     def fullcode(self):
         """Returns a full code, {parent_code}-{our_code}."""
@@ -157,15 +224,52 @@ class Organization(TimeStampedModel):
         return retval
 
     def __str__(self):
-        return self.semifullcode()
+        return self.fullcode()
+
+    def get_organization_by_fullcode(fullcode):
+        """Class method which returns organization with given fullcode.
+
+        This will get the Organization with the given full code. If such
+        an Organization object is found, returns it.  Returns None if not
+        found.
+        """
+        codes = fullcode.split('-')
+        lastcode = codes[-1]
+        orgs = Organization.objects.filter(code__exact=lastcode)
+        for org in orgs:
+            if org.fullcode() == fullcode:
+                return org
+        return None
 
     class Meta:
-        ordering = ['shortname', ]
+        ordering = ['organization_level', 'code', ]
         constraints = [
                 models.UniqueConstraint(
                     name='organization_code_parent_unique',
                     fields=[ 'code', 'parent' ]
-                    )
+                    ),
+                models.UniqueConstraint(
+                    name='organization_code_nullparent_unique',
+                    fields=['code'],
+                    condition=Q(parent__isnull=True)
+                    ),
                 ]
+
+class Directory2Organization(TimeStampedModel):
+    """This table links strings in LDAP or similar directories to organizations.
+    """
+    organization = models.ForeignKey(
+            Organization,
+            on_delete=models.CASCADE, 
+            null=False,
+            blank=False)
+    directory_string = models.CharField(
+            max_length=1024, 
+            null=False,
+            blank=False, 
+            unique=True)
+
+    def __str__(self):
+        return '{}=>{}'.format(directory_string,organization)
 
 
