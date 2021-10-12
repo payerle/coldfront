@@ -333,7 +333,10 @@ class Organization(TimeStampedModel):
             tmporgs |= { placeholder }
 
         # Convert tmporgs set to list 
-        return list(tmporgs)
+        tmporgs = list(tmporgs)
+        # and now to Organizations
+        orglist = list( map(lambda x: x.organization, tmporgs))
+        return orglist
 
     def add_parents_to_organization_list(organizations):
         """Given a list of organizations, append to the list
