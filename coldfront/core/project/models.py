@@ -48,7 +48,7 @@ We do not have information about your research. Please provide a detailed descri
     requires_review = models.BooleanField(default=True)
     history = HistoricalRecords()
     organizations = models.ManyToManyField(Organization,
-            related_name='projects',)
+            related_name='projects', blank=True)
 
     def clean(self):
         if 'Auto-Import Project'.lower() in self.title.lower():
@@ -113,14 +113,6 @@ We do not have information about your research. Please provide a detailed descri
 
     def __str__(self):
         return self.title
-
-    def selectable_organizations(self):
-        """Returns organizations with is_selectable_project set.
-
-        For filtering stuff in templates.
-        """
-        return Organization.objects.filter(projects=self,
-                is_selectable_for_project=True)
 
     class Meta:
         ordering = ['title']

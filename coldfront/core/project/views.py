@@ -53,6 +53,11 @@ ALLOCATION_ENABLE_ALLOCATION_RENEWAL = import_from_settings(
     'ALLOCATION_ENABLE_ALLOCATION_RENEWAL', True)
 ALLOCATION_DEFAULT_ALLOCATION_LENGTH = import_from_settings(
     'ALLOCATION_DEFAULT_ALLOCATION_LENGTH', 365)
+ORGANIZATION_PROJECT_DISPLAY_MODE = import_from_settings(
+    'ORGANIZATION_PROJECT_DISPLAY_MODE', True)
+ORGANIZATION_PROJECT_DISPLAY_TITLE = import_from_settings(
+    'ORGANIZATION_PROJECT_DISPLAY_TITLE', 'Department(s), etc.')
+
 
 if EMAIL_ENABLED:
     EMAIL_DIRECTOR_EMAIL_ADDRESS = import_from_settings(
@@ -133,6 +138,10 @@ class ProjectDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
         context['allocations'] = allocations
         context['project_users'] = project_users
         context['ALLOCATION_ENABLE_ALLOCATION_RENEWAL'] = ALLOCATION_ENABLE_ALLOCATION_RENEWAL
+        context['ORGANIZATION_PROJECT_DISPLAY_MODE'] = ORGANIZATION_PROJECT_DISPLAY_MODE
+        context['ORGANIZATION_PROJECT_DISPLAY_TITLE'] = ORGANIZATION_PROJECT_DISPLAY_TITLE
+        context['organizations'] = Organization.objects.filter(
+            projects=self.object, is_selectable_for_project=True)
 
         try:
             context['ondemand_url'] = settings.ONDEMAND_URL

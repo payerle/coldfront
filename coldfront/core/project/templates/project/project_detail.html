@@ -70,13 +70,20 @@ Project Detail
         {% endif %}
     </p>
     <p class="card-text text-justify"><strong>Created: </strong>{{ project.created|date:"M. d, Y" }}</p>
-    <p class="card-text text-justify"><strong>Departments: </strong>
-    	{% for dept in project.selectable_organizations %}
-		{% if not forloop.first %} , {% endif %}
+    {% if ORGANIZATION_PROJECT_DISPLAY_MODE %}
+    	{% for dept in organizations %}
+		{% if forloop.first %} 
+    <p class="card-text text-justify"><strong>{{ ORGANIZATION_PROJECT_DISPLAY_TITLE }}: </strong>
+		{% else %},
+		{% endif %}
 		{{ dept.semifullcode }}
 	{% empty %}
-		no departments found
+		{% if ORGANIZATION_PROJECT_DISPLAY_MODE != 'not-empty' %}
+    <p class="card-text text-justify"><strong>{{ ORGANIZATION_PROJECT_DISPLAY_TITLE }}: </strong>
+		none found
+		{% endif %}
 	{% endfor %}
+    {% endif %}
 
   </div>
 </div>
