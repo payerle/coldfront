@@ -134,8 +134,6 @@ class Organization(TimeStampedModel):
             default=True,
             help_text='This organization can be selected for Projects')
 
-
-
     def __str__(self):
         return self.shortname
 
@@ -202,7 +200,7 @@ class Organization(TimeStampedModel):
         retval = []
         if self.parent:
             retval = self.parent.ancestors()
-            retval.append(parent)
+            retval.append(self.parent)
         return retval
                 
     def fullcode(self):
@@ -241,6 +239,217 @@ class Organization(TimeStampedModel):
                 return org
         return None
 
+    def get_or_create_unknown_main():
+        """This returns a 'top-level' Unknown organization.
+
+        It will look for one, and return if found.  If not found,
+        creates one.
+        """
+        qset = Organization.objects.filter(code='Unknown', parent__isnull=True)
+        if qset:
+            # We got an org with code='Unknown', return first found
+            return qset[0]
+
+        #Not found, create one
+        qset = OrganizationLevel.objects.filter(parent__isnull=True)
+        if not qset:
+            raise OrganizationLevel.DoesNotExist('No parentless OrganizationLevel found')
+        orglevel = qset[0]
+        new = Organization.objects.create(
+                code='Unknown',
+                parent=None,
+                organization_level=orglevel,
+                shortname='Unknown',
+                longname='Container for Unknown organizations'
+                )
+        return new
+
+    def create_unknown_object_for_dir_string(dirstring):
+        """This creates a placeholder Organization for the 
+        given Directory string.
+
+        A new Organization will be created under the top-
+        level Unknown Organization, and will create a
+        Directory2Organization object refering to it.
+        The new Organization will be named Unknown-dddd
+        where dddd is some number.
+
+        This is to help facilitate admins fixing things
+        afterwards --- either by merging the new directory
+        string with an existing Organization or creating 
+        a new one.
+
+        The newly created Organization is returned.
+        """
+        unknown_main = Organization.get_or_create_unknown_main()
+        placeholder = Organization.objects.create(
+            code='Unknown-placeholder',
+            parent=unknown_main,
+            shortname='Unknown placeholder',
+            longname='Unknown: {}'.format(dirstring),
+            )
+        tmpid = placeholder.id
+        placeholder.code = 'Unknown-{}'.format(id)
+        placeholder.save()
+        Directory2Organization.objects.create(
+                organizatin=placeholder,
+                directory_string=dirstring).save()
+        return placeholder
+
+
+    
+    def convert_strings_to_orgs(strings, createUndefined=False):
+        """This class method takes a list of strings, and returns 
+        a list of organizations.
+
+        Strings should be a list of strings as returned by the 
+        directory.  On success it will return a list of unique 
+        Organizations corresponding to the strings.
+
+        If a string is given which does not match any strings in 
+        Directory2Organization, the behavior will depend on the 
+        value of createUndefined.  If createUndefined is False, 
+        the string will just be ignored.  If createUndefined is
+        True, will call create_unknown_object_for_dir_string and
+        include it in the returned list.
+        """
+        tmporgs = set(())
+        for string in strings:
+            qset = Directory2Organization.objects.filter(
+                directory_string=string)
+            if qset:
+                # Got an object, add it to tmporgs
+                org = qset[0]
+                tmporgs |= { org }
+                continue
+            # String did not match a known Directory2Object string
+            if not createUndefined:
+                # Just ignore it
+                continue
+            # Create a placeholder organization
+            placeholder = \
+                    Organization.create_unknown_object_for_dir_string(
+                    dirstring)
+            tmporgs |= { placeholder }
+
+        # Convert tmporgs set to list 
+        return list(tmporgs)
+
+    def add_parents_to_organization_list(organizations):
+        """Given a list of organizations, append to the list
+        any ancestor organizations to the list.
+
+        Returns the augmented list of Organizations
+        """
+        tmporgs = set(organizations)
+        # Add all ancestors to tmporgs set
+        for org in organizations:
+            ancestors = org.ancestors()
+            tmporgs |= set(ancestors)
+        # Now find what was added and append to the list
+        toadd = tmporgs - set(organizations)
+        return organizations +list(toadd)
+
+    def update_user_organizations(user, organizations,
+            addParents=False, delete=False):
+        """Updates the organizations associated with user from list
+        of Organizations.
+
+        Given an UserProfile and a list of Organizations, update 
+        the Organizations associated with the UserProfile.
+
+        If addParents is set, will include the ancestors of any
+        Organizations in the list as well.
+        If delete is set, will disassociated from the UserProfile
+        and Organizations not in the (possible augmented with
+        parents) Organizations list.
+        """
+        orgs2add = organizations
+        if addParents:
+            orgs2add = Organization.add_parents_to_organization_list(
+                    orgs2add)
+        orgs2add = set(orgs2add)
+        oldorgset = set(user.organizations.all())
+        neworgs = orgs2add - oldorgset
+        for org in list(neworgs):
+            user.organizations.add(org)
+        if delete:
+            orgs2del = oldorgset - orgs2add
+            for org in list(orgs2del):
+                user.organizations.remove(org)
+        return
+
+    def update_project_organizations(project, organizations,
+            addParents=False, delete=False):
+        """Updates the organizations associated with project from list
+        of Organizations.
+
+        Given an Project and a list of Organizations, update 
+        the Organizations associated with the Project.
+
+        If addParents is set, will include the ancestors of any
+        Organizations in the list as well.
+        If delete is set, will disassociated from the UserProfile
+        and Organizations not in the (possible augmented with
+        parents) Organizations list.
+        """
+        orgs2add = organizations
+        if addParents:
+            orgs2add = Organization.add_parents_to_organization_list(
+                    orgs2add)
+        orgs2add = set(orgs2add)
+        oldorgset = set(project.organizations.all())
+        neworgs = orgs2add - oldorgset
+        for org in list(neworgs):
+            project.organizations.add(org)
+        if delete:
+            orgs2del = oldorgset - orgs2add
+            for org in list(orgs2del):
+                project.organizations.remove(org)
+        return
+
+    def update_user_organizations_from_dirstrings(
+            user, dirstrings, addParents=False, 
+            delete=False, createUndefined=False):
+        """Updates the organizations associated with user from list
+        of directory strings.
+
+        Given an UserProfile and a list of Directory2Organization
+        directory_strings, updates the the Organizations 
+        associated with the UserProfile.
+
+        Basically, does convert_strings_to_orgs followed by
+        update_user_organizations.  addParents and delete passed
+        to update_user_organizations, and createUndefined to
+        convert_strings_to_orgs.
+        """
+        orgs2add = Organization.convert_strings_to_orgs(
+                dirstrings, createUndefined)
+        Organization.update_user_organizations(
+                user, orgs2add, addParents, delete)
+        return
+
+    def update_project_organizations_from_dirstrings(
+            project, dirstrings, addParents=False, 
+            delete=False, createUndefined=False):
+        """Updates the organizations associated with project from list
+        of directory strings.
+
+        Given an Project and a list of Directory2Organization
+        directory_strings, updates the the Organizations 
+        associated with the Project.
+
+        Basically, does convert_strings_to_orgs followed by
+        update_project_organizations.  addParents and delete passed
+        to update_project_organizations, and createUndefined to
+        convert_strings_to_orgs.
+        """
+        orgs2add = Organization.convert_strings_to_orgs(
+                dirstrings, createUndefined)
+        Organization.update_project_organizations(
+                project, orgs2add, addParents, delete)
+        return
+
     class Meta:
         ordering = ['organization_level', 'code', ]
         constraints = [
@@ -270,6 +479,6 @@ class Directory2Organization(TimeStampedModel):
             unique=True)
 
     def __str__(self):
-        return '{}=>{}'.format(directory_string,organization)
+        return '{}=>{}'.format(self.directory_string,self.organization)
 
 
