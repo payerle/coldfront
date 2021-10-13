@@ -203,6 +203,25 @@ class Organization(TimeStampedModel):
             retval.append(self.parent)
         return retval
                 
+    def descendents(self):
+        """Returns of list ref of all descendents
+
+        Returns a list like [ child1, child2, ... grandchild1, ... ]
+        Returns empty list if no children, otherwise returns a list
+        with all of invocant's children, and all of there children, etc.
+        """
+        # Get immediate children
+        import sys
+        children = list(Organization.objects.filter(parent=self))
+        retval = children
+        for child in children:
+            # For each child, get it's descendents
+            tmp = child.descendents()
+            retval.extend(tmp)
+        # Deduplicate
+        retval = list(set(retval))
+        return retval
+                
     def fullcode(self):
         """Returns a full code, {parent_code}-{our_code}."""
         retval = self.code

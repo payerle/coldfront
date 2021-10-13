@@ -29,6 +29,20 @@ class Command(BaseCommand):
                     'which are found in all of them.  Default is to list users '
                     'in any of them',
                 action='store_true',)
+        parser.add_argument('--descendents', '--children', '-c',
+                help='If set, then when matching against a given fullcode of '
+                    'an Organization, we consider an user to match if the '
+                    'user belongs to any Organization descended from the named '
+                    'Organization.  If unset (default), an user matches only '
+                    'if it belongs to the named Organization.',
+                action='store_true',
+                )
+        parser.add_argument('--inactive', '-i',
+                help='Normally, only active users are displayed.  If the '
+                    '--inactive flag is given, inactive users will be '
+                    'displayed as well.',
+                action='store_true',
+                )
         return
 
 
@@ -37,6 +51,7 @@ class Command(BaseCommand):
         orgcodes = options['organization']
         andorgs = options['and']
         verbosity = options['verbosity']
+        descendents = options['descendents']
 
         users = set()
         for orgcode in orgcodes:
@@ -44,9 +59,12 @@ class Command(BaseCommand):
             if org is None:
                 raise CommandError('No Organization with fullcode {} '
                         'found, aborting'.format(orgcode))
+            orgs = [ org ]
+            if descendents:
+                orgs.extend(org.descendents())
 
             tmpusers = UserProfile.objects.filter(
-                    organizations=org)
+                    organizations__in=orgs)
 
             tmpuset = set(tmpusers.all())
             if andorgs:
@@ -59,9 +77,15 @@ class Command(BaseCommand):
         users = sorted(users, key=lambda x: x.user.last_name)
         for user in users:
             if verbosity:
-                sys.stdout.write('{}: {}, {}\n'.format(
-                    user.user.username, user.user.last_name, 
-                    user.user.first_name))
+                status = 'INACTIVE'
+                if user.user.is_active:
+                    status='Active'
+
+                sys.stdout.write('{uname}: {last}, {first} [{status}]\n'.format(
+                    uname=user.user.username, 
+                    last=user.user.last_name, 
+                    first=user.user.first_name,
+                    status=status))
             else:
                 sys.stdout.write('{}\n'.format(
                     user.user.username))
