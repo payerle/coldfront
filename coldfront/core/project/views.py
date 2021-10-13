@@ -33,7 +33,6 @@ from coldfront.core.project.forms import (ProjectAddUserForm,
                                           ProjectRemoveUserForm,
                                           ProjectReviewEmailForm,
                                           ProjectReviewForm, ProjectSearchForm,
-                                          #ProjectUpdateForm,
                                           ProjectUserUpdateForm)
 from coldfront.core.project.models import (Project, ProjectReview,
                                            ProjectReviewStatusChoice,
