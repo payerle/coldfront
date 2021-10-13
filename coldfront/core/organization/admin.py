@@ -61,8 +61,25 @@ class OrganizationAdminForm(forms.ModelForm):
         if commit:
             organization.save()
         if organization.pk:
-            organization.users = self.cleaned_data['users']
-            organization.projects = self.cleaned_data['projects']
+            # Update the users m2m relationship
+            oldusers_set = set(organization.users.all())
+            newusers_set = set(self.cleaned_data['users'])
+            users2add = list(newusers_set - oldusers_set)
+            users2del = list(oldusers_set - newusers_set)
+            for userprof in users2del:
+                organization.users.remove(userprof)
+            for userprof in users2add:
+                organization.users.add(userprof)
+
+            # Update the projects m2m relationship
+            oldprojects_set = set(organization.projects.all())
+            newprojects_set = set(self.cleaned_data['projects'])
+            projects2add = list(newprojects_set - oldprojects_set)
+            projects2del = list(oldprojects_set - newprojects_set)
+            for projectprof in projects2del:
+                organization.projects.remove(projectprof)
+            for projectprof in projects2add:
+                organization.projects.add(projectprof)
             self.save_m2m()
         return organization
 
@@ -82,7 +99,7 @@ class OrganizationAdmin(admin.ModelAdmin):
         'shortname',
         'longname',
     )
-    search_fields = ['name', 'level']
+    search_fields = ['code',]
     form = OrganizationAdminForm
 
 

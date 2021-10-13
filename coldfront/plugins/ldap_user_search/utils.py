@@ -27,7 +27,6 @@ class LDAPUserSearch(UserSearch):
     def parse_ldap_entry(self, entry):
         entry_dict = json.loads(entry.entry_to_json()).get('attributes')
 
-        import sys
         user_dict = {
             'last_name': entry_dict.get('sn')[0] if entry_dict.get('sn') else '',
             'first_name': entry_dict.get('givenName')[0] if entry_dict.get('givenName') else '',

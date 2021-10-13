@@ -78,6 +78,29 @@ class OrganizationLevel(TimeStampedModel):
         self.full_clean()
         return super(OrganizationLevel, self).save(*args, **kwargs)
                 
+    def root_organization_level():
+        """Returns the 'root' OrganizationLevel, ie orglevel w/out parent.
+
+        Returns the root OrganizationLevel if found (first found), or
+        None if none found.
+        """
+        qset = OrganizationLevel.objects.filter(parent__isnull=True)
+        if qset:
+            return qset[0]
+        else:
+            return None
+
+    def child_organization_level(self):
+        """Returns the OrganizationLevel whose parent is self.
+
+        Returns None if no child found.
+        """
+        qset = OrganizationLevel.objects.filter(parent=self)
+        if qset:
+            return qset[0]
+        else:
+            return None
+
     class Meta:
         ordering = ['-level']
 
@@ -258,22 +281,26 @@ class Organization(TimeStampedModel):
                 return org
         return None
 
-    def get_or_create_unknown_main():
+    def get_or_create_unknown_main(dryrun=False):
         """This returns a 'top-level' Unknown organization.
 
         It will look for one, and return if found.  If not found,
         creates one.
+
+        If dryrun is set, will not actually create an instance but
+        just return None
         """
         qset = Organization.objects.filter(code='Unknown', parent__isnull=True)
         if qset:
             # We got an org with code='Unknown', return first found
             return qset[0]
 
+        if dryrun:
+            return None
         #Not found, create one
-        qset = OrganizationLevel.objects.filter(parent__isnull=True)
-        if not qset:
+        orglevel = OrganizationLevel.root_organization_level()
+        if not orglevel:
             raise OrganizationLevel.DoesNotExist('No parentless OrganizationLevel found')
-        orglevel = qset[0]
         new = Organization.objects.create(
                 code='Unknown',
                 parent=None,
@@ -283,14 +310,14 @@ class Organization(TimeStampedModel):
                 )
         return new
 
-    def create_unknown_object_for_dir_string(dirstring):
+    def create_unknown_object_for_dir_string(dirstring, dryrun=False):
         """This creates a placeholder Organization for the 
         given Directory string.
 
         A new Organization will be created under the top-
         level Unknown Organization, and will create a
         Directory2Organization object refering to it.
-        The new Organization will be named Unknown-dddd
+        The new Organization will be named Unknown_dddd
         where dddd is some number.
 
         This is to help facilitate admins fixing things
@@ -300,24 +327,34 @@ class Organization(TimeStampedModel):
 
         The newly created Organization is returned.
         """
-        unknown_main = Organization.get_or_create_unknown_main()
-        placeholder = Organization.objects.create(
-            code='Unknown-placeholder',
+        unknown_main = Organization.get_or_create_unknown_main(dryrun)
+        orglevel = None
+        if unknown_main is not None:
+            main_orglevel = unknown_main.organization_level
+            orglevel = main_orglevel.child_organization_level()
+        placeholder = Organization(
+            code='Unknown_placeholder',
             parent=unknown_main,
-            shortname='Unknown placeholder',
+            organization_level=orglevel,
+            shortname='Unknown: {}'.format(dirstring),
             longname='Unknown: {}'.format(dirstring),
             )
+        if not dryrun:
+            placeholder.save()
         tmpid = placeholder.id
-        placeholder.code = 'Unknown-{}'.format(id)
-        placeholder.save()
-        Directory2Organization.objects.create(
-                organizatin=placeholder,
-                directory_string=dirstring).save()
+        if tmpid is None:
+            tmpid = abs(hash(dirstring))
+            placeholder.id = tmpid
+        placeholder.code = 'Unknown_{}'.format(tmpid)
+        if not dryrun:
+            placeholder.save()
+            Directory2Organization.objects.create(
+                    organization=placeholder,
+                    directory_string=dirstring).save()
         return placeholder
-
-
     
-    def convert_strings_to_orgs(strings, createUndefined=False):
+    def convert_strings_to_orgs(strings, createUndefined=False,
+            dryrun=False):
         """This class method takes a list of strings, and returns 
         a list of organizations.
 
@@ -338,7 +375,7 @@ class Organization(TimeStampedModel):
                 directory_string=string)
             if qset:
                 # Got an object, add it to tmporgs
-                org = qset[0]
+                org = qset[0].organization
                 tmporgs |= { org }
                 continue
             # String did not match a known Directory2Object string
@@ -348,13 +385,11 @@ class Organization(TimeStampedModel):
             # Create a placeholder organization
             placeholder = \
                     Organization.create_unknown_object_for_dir_string(
-                    dirstring)
+                    string, dryrun)
             tmporgs |= { placeholder }
 
         # Convert tmporgs set to list 
-        tmporgs = list(tmporgs)
-        # and now to Organizations
-        orglist = list( map(lambda x: x.organization, tmporgs))
+        orglist = list(tmporgs)
         return orglist
 
     def add_parents_to_organization_list(organizations):
@@ -397,7 +432,12 @@ class Organization(TimeStampedModel):
             orgs2add = Organization.add_parents_to_organization_list(
                     orgs2add)
         orgs2add = set(orgs2add)
-        oldorgset = set(user.organizations.all())
+
+        # Handle special case when (in dryrun) we are given an user
+        # who has not been saved to DB yet.  Should only be for dryrun
+        oldorgset = set()
+        if user.id is not None:
+            oldorgset = set(user.organizations.all())
         neworgs = orgs2add - oldorgset
         if not dryrun:
             for org in list(neworgs):
@@ -471,7 +511,9 @@ class Organization(TimeStampedModel):
         convert_strings_to_orgs.
         """
         orgs2add = Organization.convert_strings_to_orgs(
-                dirstrings, createUndefined)
+                strings=dirstrings, 
+                createUndefined=createUndefined,
+                dryrun=dryrun)
         results = Organization.update_user_organizations(
                 user=user, 
                 organizations=orgs2add, 

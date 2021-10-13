@@ -42,6 +42,13 @@ class Command(BaseCommand):
                     'currently belongs to if not present in the list from '
                     'LDAP (after adding ancestors if so requested)'
                     )
+        parser.add_argument('--create-placeholder', '--create', '--placeholder',
+                action='store_true',
+                help='If set, if an LDAP directory_string found which we '
+                    'cannot convert to an Organization is encountered, '
+                    'will create a placeholder Organization and assign '
+                    'it to user',
+                    )
         parser.add_argument('--dryrun',
                 action='store_true',
                 help='If set, we will do the LDAP search but print results '
@@ -58,6 +65,7 @@ class Command(BaseCommand):
         delete = options['delete']
         dryrun = options['dryrun']
         verbosity = options['verbosity']
+        create_placeholder = options['create-placeholder']
 
         v_or_d_text = '[VERBOSE]'
         if dryrun:
@@ -87,13 +95,16 @@ class Command(BaseCommand):
                     search_by='username_only')
             if results:
                 userrec = results[0]
-                directory_strings = userrec['directory_strings']
+                directory_strings = []
+                if 'directory_strings' in userrec:
+                    directory_strings = userrec['directory_strings']
                 results= Organization.update_user_organizations_from_dirstrings(
                         user=userprof,
                         dirstrings = directory_strings,
                         addParents = addparents,
                         dryrun = dryrun,
                         delete = delete,
+                        createUndefined = create_placeholder,
                         )
                 if verbosity:
                     username = userprof.user.username
