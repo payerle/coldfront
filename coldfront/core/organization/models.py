@@ -354,18 +354,24 @@ class Organization(TimeStampedModel):
         return organizations +list(toadd)
 
     def update_user_organizations(user, organizations,
-            addParents=False, delete=False):
+            addParents=False, delete=False, dryrun=False):
         """Updates the organizations associated with user from list
         of Organizations.
 
         Given an UserProfile and a list of Organizations, update 
         the Organizations associated with the UserProfile.
 
+        Return value is dictionary with keys 'added' and 'removed',
+        the values for which are lists of Organization objects
+        which were added/removed from the user.
+
         If addParents is set, will include the ancestors of any
         Organizations in the list as well.
         If delete is set, will disassociated from the UserProfile
         and Organizations not in the (possible augmented with
         parents) Organizations list.
+        If dryrun is set, does not actually add/remove Organizations, 
+        but still returns as if it did.
         """
         orgs2add = organizations
         if addParents:
@@ -374,27 +380,37 @@ class Organization(TimeStampedModel):
         orgs2add = set(orgs2add)
         oldorgset = set(user.organizations.all())
         neworgs = orgs2add - oldorgset
-        for org in list(neworgs):
-            user.organizations.add(org)
+        if not dryrun:
+            for org in list(neworgs):
+                user.organizations.add(org)
+
+        orgs2del = oldorgset - orgs2add
+        orgs2del = list(orgs2del)
         if delete:
-            orgs2del = oldorgset - orgs2add
-            for org in list(orgs2del):
-                user.organizations.remove(org)
-        return
+            if not dryrun:
+                for org in orgs2del:
+                    user.organizations.remove(org)
+        return {'added': neworgs, 'removed': orgs2del }
 
     def update_project_organizations(project, organizations,
-            addParents=False, delete=False):
+            addParents=False, delete=False, dryrun=False):
         """Updates the organizations associated with project from list
         of Organizations.
 
         Given an Project and a list of Organizations, update 
         the Organizations associated with the Project.
 
+        Return value is dictionary with keys 'added' and 'removed',
+        the values for which are lists of Organization objects
+        which were added/removed from the project.
+
         If addParents is set, will include the ancestors of any
         Organizations in the list as well.
         If delete is set, will disassociated from the UserProfile
         and Organizations not in the (possible augmented with
         parents) Organizations list.
+        If dryrun is set, does not actually add/remove Organizations, 
+        but still returns as if it did.
         """
         orgs2add = organizations
         if addParents:
@@ -403,17 +419,22 @@ class Organization(TimeStampedModel):
         orgs2add = set(orgs2add)
         oldorgset = set(project.organizations.all())
         neworgs = orgs2add - oldorgset
-        for org in list(neworgs):
-            project.organizations.add(org)
+        if not dryrun:
+            for org in list(neworgs):
+                project.organizations.add(org)
+
+        orgs2del = oldorgset - orgs2add
+        orgs2del = list(orgs2del)
         if delete:
-            orgs2del = oldorgset - orgs2add
-            for org in list(orgs2del):
-                project.organizations.remove(org)
-        return
+            if not dryrun:
+                for org in orgs2del:
+                    project.organizations.remove(org)
+        return { 'added': neworgs, 'removed': orgs2del }
 
     def update_user_organizations_from_dirstrings(
             user, dirstrings, addParents=False, 
-            delete=False, createUndefined=False):
+            delete=False, createUndefined=False,
+            dryrun=False):
         """Updates the organizations associated with user from list
         of directory strings.
 
@@ -421,20 +442,28 @@ class Organization(TimeStampedModel):
         directory_strings, updates the the Organizations 
         associated with the UserProfile.
 
+        Like update_user_organizations, returns a dictionary with 
+        keys 'added' and 'removed' with lists of Organization objects
+        added/removed.
+
         Basically, does convert_strings_to_orgs followed by
-        update_user_organizations.  addParents and delete passed
+        update_user_organizations.  addParents, delete, and dryrun passed
         to update_user_organizations, and createUndefined to
         convert_strings_to_orgs.
         """
         orgs2add = Organization.convert_strings_to_orgs(
                 dirstrings, createUndefined)
-        Organization.update_user_organizations(
-                user, orgs2add, addParents, delete)
-        return
+        results = Organization.update_user_organizations(
+                user=user, 
+                organizations=orgs2add, 
+                addParents=addParents, 
+                delete=delete,
+                dryrun=dryrun)
+        return results
 
     def update_project_organizations_from_dirstrings(
             project, dirstrings, addParents=False, 
-            delete=False, createUndefined=False):
+            delete=False, createUndefined=False, dryrun=False):
         """Updates the organizations associated with project from list
         of directory strings.
 
@@ -443,15 +472,20 @@ class Organization(TimeStampedModel):
         associated with the Project.
 
         Basically, does convert_strings_to_orgs followed by
-        update_project_organizations.  addParents and delete passed
+        update_project_organizations.  addParents, delete, and dryrun passed
         to update_project_organizations, and createUndefined to
         convert_strings_to_orgs.
         """
         orgs2add = Organization.convert_strings_to_orgs(
                 dirstrings, createUndefined)
-        Organization.update_project_organizations(
-                project, orgs2add, addParents, delete)
-        return
+        results = Organization.update_project_organizations(
+                project=project, 
+                organizations=orgs2add, 
+                addParents=addParents, 
+                delete=delete,
+                dryrun=dryrun,
+                )
+        return results
 
     class Meta:
         ordering = ['organization_level', 'code', ]
