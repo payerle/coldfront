@@ -126,7 +126,7 @@ class Organization(TimeStampedModel):
             max_length=512, 
             null=True, 
             blank=False, 
-            unique=True,
+            unique=False,
             help_text='A short code for referencing this organization.  '
                 'Typically will be combined with short codes from all parents '
                 'to get an unique reference. May not contain hyphen (-)',
@@ -140,14 +140,14 @@ class Organization(TimeStampedModel):
             max_length=1024, 
             null=True, 
             blank=False, 
-            unique=True,
+            unique=False,
             help_text='A medium length name for this organization, used '
                 'in many displays.')
     longname = models.CharField(
             max_length=2048, 
             null=True, 
             blank=False, 
-            unique=True,
+            unique=False,
             help_text='The full name for this organization, for official '
                 'contexts')
     is_selectable_for_user = models.BooleanField(
@@ -551,13 +551,35 @@ class Organization(TimeStampedModel):
     class Meta:
         ordering = ['organization_level', 'code', ]
         constraints = [
+                # Require code and parent be pairwise unique
                 models.UniqueConstraint(
                     name='organization_code_parent_unique',
                     fields=[ 'code', 'parent' ]
                     ),
+                # even when parent=NULL
                 models.UniqueConstraint(
                     name='organization_code_nullparent_unique',
                     fields=['code'],
+                    condition=Q(parent__isnull=True)
+                    ),
+                # Similar for shortname
+                models.UniqueConstraint(
+                    name='organization_shortname_parent_unique',
+                    fields=[ 'shortname', 'parent' ]
+                    ),
+                models.UniqueConstraint(
+                    name='organization_shortname_nullparent_unique',
+                    fields=['shortname'],
+                    condition=Q(parent__isnull=True)
+                    ),
+                # Similar for longname
+                models.UniqueConstraint(
+                    name='organization_longname_parent_unique',
+                    fields=[ 'longname', 'parent' ]
+                    ),
+                models.UniqueConstraint(
+                    name='organization_longname_nullparent_unique',
+                    fields=['longname'],
                     condition=Q(parent__isnull=True)
                     ),
                 ]
