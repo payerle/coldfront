@@ -5,6 +5,7 @@ import csv
 from io import StringIO
 
 from coldfront.core.utils.common import import_from_settings
+from coldfront.core.allocation.models import AllocationAttribute
 
 SLURM_CLUSTER_ATTRIBUTE_NAME = import_from_settings('SLURM_CLUSTER_ATTRIBUTE_NAME', 'slurm_cluster')
 SLURM_ACCOUNT_ATTRIBUTE_NAME = import_from_settings('SLURM_ACCOUNT_ATTRIBUTE_NAME', 'slurm_account_name')
@@ -98,3 +99,28 @@ def slurm_check_assoc(user, cluster, account):
 def slurm_dump_cluster(cluster, fname, noop=False):
     cmd = SLURM_CMD_DUMP_CLUSTER.format(shlex.quote(cluster), shlex.quote(fname))
     _run_slurm_cmd(cmd, noop=noop)
+
+def allocations_with_slurm_accounts():
+    """Returns a list of Allocations which have slurm_account_name Attribute.
+
+    This searches all Allocations which have an AllocationAttribute with type
+    given by SLURM_ACCOUNT_ATTRIBUTE_NAME.
+
+    It returns a list consisting of dictionaries with keys:
+        allocation: The Allocation instance
+        account_name: The slurm_account_name
+    """
+    if SLURM_ACCOUNT_ATTRIBUTE_NAME:
+        aaname = SLURM_ACCOUNT_ATTRIBUTE_NAME
+    else
+        aaname = 'slurm_account_name'
+
+    aattribs = AllocationAttribute.objects.select_related('allocation').filter(
+            allocation_attribute_type__name=aaname)
+    retval = [list(map(lambda x: 
+        {   'allocation': x.allocation, 'account_name': x.value },
+        aattribs)) ]
+    return retvals
+
+
+
