@@ -156,7 +156,7 @@ class OrganizationLevel(TimeStampedModel):
             if len(qset) > 1:
                 raise ValidationError('OrganizationLevel hierarchy '
                     'has multiple parentless members: {}'.format(
-                    ', '.join(list(qset)))
+                    ', '.join(list(qset))))
         last_orglevel = qset[0]
         retval.append(last_orglevel)
 
@@ -171,7 +171,7 @@ class OrganizationLevel(TimeStampedModel):
                     if len(qset) > 1:
                         raise ValidationError('OrganizationLevel hierarchy '
                             'issue: orglevel={} has multiple children: '
-                            '{}'.format(last_orglevel, ', '.join(list(qset)))
+                            '{}'.format(last_orglevel, ', '.join(list(qset))))
                     last_orglevel = qset[0]
                     retval.append(last_orglevel)
 
@@ -226,9 +226,9 @@ class OrganizationLevel(TimeStampedModel):
         # basic chain and no outliers.
         # Now just ensure levels are OK, names unique, and not too many
         # exporting to Xdmod
-        allnames = set{}
+        allnames = set()
         lastlevel = None
-        xdmod_exporters = set{}
+        xdmod_exporters = set()
         lastorglev = None
 
         for orglev in org_level_hier:
@@ -804,13 +804,13 @@ class Organization(TimeStampedModel):
             # and no parents
             raise RuntimeError('Rootlevel organization with code=Unknown '
                     'seems to exist even though previously reported it '
-                    'did not'
+                    'did not')
 
         new = cls.objects.create(
                 code=unique_names['code'],
                 parent=None,
                 organization_level=orglevel,
-                shortname=unique_names['shortname']
+                shortname=unique_names['shortname'],
                 longname=unique_names['longname']
                 )
         # Cache it
