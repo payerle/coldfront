@@ -8,7 +8,6 @@ from coldfront.core.project.models import (Project, ProjectAdminComment,
                                             ProjectUser, ProjectUserMessage,
                                             ProjectUserRoleChoice,
                                             ProjectUserStatusChoice)
-
 from coldfront.core.organization.models import Organization
 
 
@@ -89,6 +88,15 @@ class ProjectUserMessageInline(admin.TabularInline):
 
 
 class ProjAllOrgsListFilter(admin.SimpleListFilter):
+    """Filter for Project Admin page, to filter by Organization.
+
+    Will allow filtering by any Organization associated with a 
+    Project (either as primary_organization or additional_organization).
+    We also include all ancestors of such in the hierarchy, so that
+    e.g. selecting on a "college" will include all Projects associated
+    with "departments" belonging to the specified college.
+    """
+
     title = "Organization Membership (hierachical)"
     parameter_name = "organization"
 
@@ -115,9 +123,6 @@ class ProjAllOrgsListFilter(admin.SimpleListFilter):
         return lookup_list
 
     def queryset(self, request, queryset):
-        #parent_org = Organization.objects.get(pk=self.value())
-        #oset = parent_org.descendants()
-        #oset.append(parent_org)
         if self.value() is None:
             return queryset
 
