@@ -141,8 +141,11 @@ class ProjectDetailView(LoginRequiredMixin, UserPassesTestMixin, DetailView):
         context['ALLOCATION_ENABLE_ALLOCATION_RENEWAL'] = ALLOCATION_ENABLE_ALLOCATION_RENEWAL
         context['ORGANIZATION_PROJECT_DISPLAY_MODE'] = ORGANIZATION_PROJECT_DISPLAY_MODE
         context['ORGANIZATION_PROJECT_DISPLAY_TITLE'] = ORGANIZATION_PROJECT_DISPLAY_TITLE
-        context['organizations'] = Organization.objects.filter(
-            projects=self.object, is_selectable_for_project=True)
+        #context['primary_organization'] = Organization.objects.filter(
+        #    projects=self.object, is_selectable_for_project=True)
+        #context['additional_organizations'] = Organization.objects.filter(
+        #    projects=self.object, is_selectable_for_project=True)
+        context['organizations'] = self.object.all_organizations
 
         try:
             context['ondemand_url'] = settings.ONDEMAND_URL
@@ -459,7 +462,8 @@ class ProjectUpdateView(SuccessMessageMixin, LoginRequiredMixin, UserPassesTestM
     template_name_suffix = '_update_form'
     fields = ['title', 'description', 'field_of_science' ]
     if ORGANIZATION_PI_CAN_EDIT_FOR_PROJECT:
-        fields.append('organizations')
+        fields.append('primary_organization')
+        fields.append('additional_organizations')
     success_message = 'Project updated.'
 
     def test_func(self):
@@ -491,7 +495,9 @@ class ProjectUpdateView(SuccessMessageMixin, LoginRequiredMixin, UserPassesTestM
         # Restrict organization choices in ProjectUpdate form to those
         # with is_selectable_for_project set
         if ORGANIZATION_PI_CAN_EDIT_FOR_PROJECT:
-            form.fields["organizations"].queryset = \
+            form.fields["primary_organization"].queryset = \
+                Organization.objects.filter(is_selectable_for_project=True)
+            form.fields["additional_organizations"].queryset = \
                 Organization.objects.filter(is_selectable_for_project=True)
         return form
 

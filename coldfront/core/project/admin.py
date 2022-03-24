@@ -9,6 +9,8 @@ from coldfront.core.project.models import (Project, ProjectAdminComment,
                                             ProjectUserRoleChoice,
                                             ProjectUserStatusChoice)
 
+from coldfront.core.organization.models import Organization
+
 
 @admin.register(ProjectStatusChoice)
 class ProjectStatusChoiceAdmin(admin.ModelAdmin):
@@ -86,18 +88,69 @@ class ProjectUserMessageInline(admin.TabularInline):
     readonly_fields = ('author', 'created')
 
 
+class ProjAllOrgsListFilter(admin.SimpleListFilter):
+    title = "Organization Membership (hierachical)"
+    parameter_name = "organization"
+
+    def lookups(self, request, model_admin):
+        """Gets list of all orgs which are connected with a project
+
+        Includes both primary and addition_organizations, and any
+        ancestor organizations.
+        """
+
+        # This gets a list of lists
+        all_orgs = map(lambda x: x.all_organizations(),
+            Project.objects.all())
+        # Flatten into a simple list, dedup, etc
+        all_orgs = list(set([ org for sublist in all_orgs for org in sublist]))
+        # Add parent orgs
+        all_orgs = Organization.add_parents_to_organization_list(all_orgs)
+        # Sort by full code
+        all_orgs.sort(key=lambda x: x.fullcode())
+        # Convert to list of tuples:
+        #   coded value is pk of org
+        #   display value is semi-fullcode of org
+        lookup_list = map(lambda x: (x.pk, x.semifullcode()), all_orgs)
+        return lookup_list
+
+    def queryset(self, request, queryset):
+        #parent_org = Organization.objects.get(pk=self.value())
+        #oset = parent_org.descendants()
+        #oset.append(parent_org)
+        if self.value() is None:
+            return queryset
+
+        tmp = Organization.objects.filter(pk=self.value()).all()
+        if tmp:
+            parent_org = tmp[0]
+            oset = parent_org.descendents()
+            oset.append(parent_org)
+        else:
+            oset = []
+
+        # Find those matching in primary_organization
+        qs1 = queryset.filter(primary_organization__in=oset)
+        # Find those matching in additional_organizations
+        qs2 = queryset.filter(additional_organizations__in=oset)
+
+        # Union them
+        qs1.union(qs2)
+        return qs1
+
+
 @admin.register(Project)
 class ProjectAdmin(SimpleHistoryAdmin):
     fields_change = ('title', 'pi', 'description', 'status', 'requires_review', 'force_review', 'created', 'modified',
-            'organizations')
+            'primary_organization', 'additional_organizations')
     readonly_fields_change = ('created', 'modified', )
-    list_display = ('pk', 'title', 'PI', 'created', 'modified', 'status')
+    list_display = ('pk', 'title', 'PI', 'created', 'modified', 'status', 'primary_organization')
     search_fields = ['pi__username', 'projectuser__user__username',
                      'projectuser__user__last_name', 'projectuser__user__last_name', 'title']
-    list_filter = ('status', 'force_review')
+    list_filter = ('status', 'force_review', ProjAllOrgsListFilter )
     inlines = [ProjectUserInline, ProjectAdminCommentInline, ProjectUserMessageInline]
     raw_id_fields = ['pi', ]
-    filter_horizontal = ['organizations', ]
+    filter_horizontal = ['additional_organizations', ]
 
     def PI(self, obj):
         return '{} {} ({})'.format(obj.pi.first_name, obj.pi.last_name, obj.pi.username)

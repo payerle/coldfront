@@ -20,6 +20,7 @@ from coldfront.core.user.utils import CombinedUserSearch
 from coldfront.core.utils.common import import_from_settings
 from coldfront.core.utils.mail import send_email_template
 from coldfront.core.organization.models import Organization
+from coldfront.core.user.models import UserProfile as modelUserProfile
 
 logger = logging.getLogger(__name__)
 EMAIL_ENABLED = import_from_settings('EMAIL_ENABLED', False)
@@ -68,8 +69,12 @@ class UserProfile(TemplateView):
         context['viewed_user'] = viewed_user
         context['ORGANIZATION_USER_DISPLAY_MODE'] = ORGANIZATION_USER_DISPLAY_MODE
         context['ORGANIZATION_USER_DISPLAY_TITLE'] = ORGANIZATION_USER_DISPLAY_TITLE
-        context['organizations'] = Organization.objects.filter(
-            users=viewed_user.userprofile, is_selectable_for_user=True)
+        import sys
+        sys.stderr.write('[TPTEST] UserProfile.get_context_data: self={}\n'.format(self))
+        sys.stderr.write('[TPTEST] UserProfile.get_context_data: viewed_user={}\n'.format(viewed_user))
+        viewed_user_profile = modelUserProfile.objects.get(user=viewed_user)
+        sys.stderr.write('[TPTEST] UserProfile.get_context_data: viewed_user_profile={}\n'.format(viewed_user_profile))
+        context['organizations'] = viewed_user_profile.all_organizations
         return context
 
 
