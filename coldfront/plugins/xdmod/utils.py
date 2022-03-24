@@ -17,7 +17,8 @@ from coldfront.plugins.slurm.utils import (
 
 XDMOD_CLOUD_PROJECT_ATTRIBUTE_NAME = import_from_settings('XDMOD_CLOUD_PROJECT_ATTRIBUTE_NAME', 'Cloud Account Name')
 XDMOD_CLOUD_CORE_TIME_ATTRIBUTE_NAME = import_from_settings('XDMOD_CLOUD_CORE_TIME_ATTRIBUTE_NAME', 'Core Usage (Hours)')
-XDMOD_ACCOUNT_ATTRIBUTE_NAME = import_from_settings('XDMOD_ACCOUNT_ATTRIBUTE_NAME', 'slurm_account_name') XDMOD_RESOURCE_ATTRIBUTE_NAME = import_from_settings('XDMOD_RESOURCE_ATTRIBUTE_NAME', 'xdmod_resource')
+XDMOD_ACCOUNT_ATTRIBUTE_NAME = import_from_settings('XDMOD_ACCOUNT_ATTRIBUTE_NAME', 'slurm_account_name') 
+XDMOD_RESOURCE_ATTRIBUTE_NAME = import_from_settings('XDMOD_RESOURCE_ATTRIBUTE_NAME', 'xdmod_resource')
 XDMOD_CPU_HOURS_ATTRIBUTE_NAME = import_from_settings('XDMOD_CPU_HOURS_ATTRIBUTE_NAME', 'Core Usage (Hours)')
 XDMOD_API_URL = import_from_settings('XDMOD_API_URL')
 
