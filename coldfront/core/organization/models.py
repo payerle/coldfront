@@ -461,7 +461,7 @@ class Organization(TimeStampedModel):
     
     parent = models.ForeignKey(
             'self', 
-            ON_delete=models.PROTECT,
+            on_delete=models.PROTECT,
             null=True, 
             blank=True)
     organization_level = models.ForeignKey(
