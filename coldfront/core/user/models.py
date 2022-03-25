@@ -8,8 +8,8 @@ class UserProfile(models.Model):
     is_pi = models.BooleanField(default=False)
     primary_organization = models.ForeignKey(Organization,
             null=True,
-            on_delete=models.SET_DEFAULT,
-            default=Organization.default_org_pk)
+            on_delete=models.PROTECT,
+            )
     additional_organizations = models.ManyToManyField(Organization,
             related_name='additional_users', blank=True)
 

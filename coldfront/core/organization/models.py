@@ -39,7 +39,7 @@ class OrganizationLevel(TimeStampedModel):
                 'the organization.')
     parent = models.OneToOneField(
             'self', 
-            on_delete=models.CASCADE, 
+            on_delete=models.PROTECT,
             null=True, 
             blank=True,
             unique=True,
@@ -110,7 +110,7 @@ class OrganizationLevel(TimeStampedModel):
         None if none found.
         """
         qset = OrganizationLevel.objects.filter(parent__isnull=True)
-        if not empty(qset):
+        if bool(qset):
             return qset[0]
         else:
             return None
@@ -147,7 +147,7 @@ class OrganizationLevel(TimeStampedModel):
 
         # Find root element
         qset = OrganizationLevel.objects.filter(parent__isnull=True)
-        if empty(qset):
+        if not bool(qset):
             # No root organization level was found 
             # Not an error, return empty list
             return retval
@@ -163,7 +163,7 @@ class OrganizationLevel(TimeStampedModel):
         # Now repeatedly add child of last_orglevel
         while last_orglevel is not None:
             qset = OrganizationLevel.objects.filter(parent=last_orglevel)
-            if empty(qset):
+            if not bool(qset):
                 last_orglevel=None
             else:
                 if validate:
@@ -311,7 +311,7 @@ class OrganizationLevel(TimeStampedModel):
 
                 # Are there any Organizations with OrgLevel=root ?
                 orgs = Organization.objects.filter(organization_level=root)
-                if not empty(orgs):
+                if orgs.exists():
                     # Yes, so we need to create a placeholder root Organization
                     rootorg = Organization.get_or_create_unknown_root()
                     # And make that the parent to all previously root-level
@@ -461,12 +461,12 @@ class Organization(TimeStampedModel):
     
     parent = models.ForeignKey(
             'self', 
-            on_delete=models.CASCADE, 
+            ON_delete=models.PROTECT,
             null=True, 
             blank=True)
     organization_level = models.ForeignKey(
             OrganizationLevel, 
-            on_delete=models.CASCADE, 
+            on_delete=models.PROTECT,
             null=False)
     code = models.CharField(
             max_length=512, 

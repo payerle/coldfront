@@ -49,8 +49,8 @@ We do not have information about your research. Please provide a detailed descri
     history = HistoricalRecords()
     primary_organization = models.ForeignKey(Organization, 
             null=True,
-            on_delete=models.SET_DEFAULT,
-            default=Organization.default_org_pk)
+            on_delete=models.PROTECT,
+            )
     additional_organizations = models.ManyToManyField(Organization,
             related_name='additional_projects', blank=True)
 
