@@ -306,7 +306,7 @@ class OrganizationLevel(TimeStampedModel):
         It will also produce a warning if disable_validation_checks is not
         set
         """
-        if self.disable_validation_checks:
+        if cls.disable_validation_checks:
             logger.warning('OrganizationLevel disable_validation_checks is '
                 'set')
 
@@ -406,13 +406,13 @@ class OrganizationLevel(TimeStampedModel):
                         'root {} with level {}'.format(
                         name, level, root, root.level))
                 # Replace root orglevel
-                self.disable_validation_checks = True
+                cls.disable_validation_checks = True
                 newroot = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newroot.save()
                 root.parent = newroot
                 root.save()
-                self.disable_validation_checks = False
+                cls.disable_validation_checks = False
 
                 # Are there any Organizations with OrgLevel=root ?
                 orgs = Organization.objects.filter(organization_level=root)
@@ -450,7 +450,7 @@ class OrganizationLevel(TimeStampedModel):
                         '{} with level {} is less than child '
                         '{} with level {}'.format(
                         name, level, child, child.level))
-                self.disable_validation_checks = True
+                cls.disable_validation_checks = True
                 newolev = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newolev.save()
@@ -458,7 +458,7 @@ class OrganizationLevel(TimeStampedModel):
                 child.save()
                 newolev.parent = parent
                 newolev.save()
-                self.disable_validation_checks = False
+                cls.disable_validation_checks = False
 
                 # Are there any Organizations with OrgLevel=child ?
                 orgs = Organization.objects.filter(organization_level=child)
@@ -518,7 +518,7 @@ class OrganizationLevel(TimeStampedModel):
         # Do we have a parent?
         if self.parent:
             # We have a parent. Do we have a child?
-            child = cls.objects.filter(parent=self)
+            child = OrganizationLevel.objects.filter(parent=self)
             if exists(child):
                 # Have parent and child
                 child = child[0]
@@ -536,7 +536,7 @@ class OrganizationLevel(TimeStampedModel):
                 return
         else:
             # No parent, so we are at root level. Do we have a child?
-            child = cls.objects.filter(parent=self)
+            child = OrganizationLevel.objects.filter(parent=self)
             if exists(child):
                 # Have child but no parent
                 # Make child new root level
