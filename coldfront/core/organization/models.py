@@ -71,7 +71,7 @@ class OrganizationLevel(TimeStampedModel):
         and delete_organization_level methods.
         """
         # Skip validation checks if disable_validation_checks
-        if disable_validation_checks:
+        if self.disable_validation_checks:
             return
 
         # First, call base class's version
@@ -102,6 +102,111 @@ class OrganizationLevel(TimeStampedModel):
         self.full_clean()
         return super(OrganizationLevel, self).save(*args, **kwargs)
                 
+    def update_orglevel_from_dict(self, new):
+        """Updates OrganizationLevel to match dictionary.
+
+        The fields of the invocant will be updated to match the
+        fields of the dictionary new.  Fields not present in the
+        dictionary new are ignored/left unchanged.
+
+        Returns None if no fields have been changed, or a 
+        dictionary with keys and values of fields which have been changed.
+        """
+        retval = {}
+        for key, value in new.items():
+            if key == 'name':
+                if self.name != value:
+                    self.name = value
+                    retval['name'] = value
+            elif key == 'level':
+                if self.name != value:
+                    self.level = value
+                    retval['level'] = value
+            elif key == 'parent':
+                if self.parent != value:
+                    self.parent = value.pk
+                    retval['parent'] = value
+            elif key == 'export_to_xdmod':
+                if self.export_to_xdmod != value:
+                    self.export_to_xdmod = value
+                    retval['export_to_xdmod'] = value
+            else:
+                raise ValueError('No field {} for {}\n'.format(
+                    key, self))
+
+        if retval:
+            self.save()
+        else:
+            retval = None
+        return retval
+
+    @classmethod
+    def create_or_update_orglevel(self, new):
+        """Creates or Updates OrganizationLevel as needed.
+
+        This method will check if an OrganizationLevel with name or
+        level as given by fields of new.  If no such OrganizationLevel
+        was found, a new OrganizationLevel is created using the arguments
+        from the dictionary new.
+
+        If such an OrganizationLevel is found, it is updated to match
+        the fields listed in new.  Any fields not present as keys to new
+        will not be updated.
+
+        Returns a triplet consisting of the OrganizationLevel found or 
+        created, a boolean indicating if a new object was created, and a 
+        (possibly empty) dictionary with the key/values of the fields 
+        which have been changed.
+        """
+        created = False
+        changed = {}
+        if 'name' in new:
+            name = new['name']
+        else:
+            name = None
+
+        if 'level' in new:
+            level = new['level']
+        else:
+            level = None
+
+        if name is None and level is None:
+            raise ValueError('The new dictionary must have either key '
+                '"name" or "level"')
+
+        olev1 = None
+        olev2 = None
+        if name is not None:
+            qset = OrganizationLevel.objects.filter(name=name)
+            if qset:
+                olev1 = qset[0]
+        if level is not None:
+            qset = OrganizationLevel.objects.filter(level=level)
+            if qset:
+                olev2 = qset[0]
+
+        if olev1 is not None:
+            if olev2 is None:
+                changed = olev1.update_orglevel_from_dict(new)
+                olev = olev1
+            else:
+                if olev1 == olev2:
+                    changed = olev1.update_orglevel_from_dict(new)
+                    olev = olev1
+                else:
+                    raise ValueError('Distinct OrganizationLevels with '
+                            'name="{}" ({})  and level="{}" ({}) '
+                           'exist'.format( name, olev1, level, olev2))
+        elif olev2 is not None:
+            changed = olev2.update_orglevel_from_dict(new)
+            olev = olev2
+        else:
+            # No matches, create new
+            created = True
+            changed = new
+            olev = OrganizationLevel.objectcs.create(**new)
+        return org, created, changed
+
     @classmethod
     def root_organization_level(cls):
         """Returns the 'root' OrganizationLevel, ie orglevel w/out parent.
@@ -172,8 +277,8 @@ class OrganizationLevel(TimeStampedModel):
                         raise ValidationError('OrganizationLevel hierarchy '
                             'issue: orglevel={} has multiple children: '
                             '{}'.format(last_orglevel, ', '.join(list(qset))))
-                    last_orglevel = qset[0]
-                    retval.append(last_orglevel)
+                last_orglevel = qset[0]
+                retval.append(last_orglevel)
 
         return retval
 
@@ -201,7 +306,7 @@ class OrganizationLevel(TimeStampedModel):
         It will also produce a warning if disable_validation_checks is not
         set
         """
-        if disable_validation_checks:
+        if self.disable_validation_checks:
             logger.warning('OrganizationLevel disable_validation_checks is '
                 'set')
 
@@ -301,13 +406,13 @@ class OrganizationLevel(TimeStampedModel):
                         'root {} with level {}'.format(
                         name, level, root, root.level))
                 # Replace root orglevel
-                disable_validation_checks = True
+                self.disable_validation_checks = True
                 newroot = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newroot.save()
                 root.parent = newroot
                 root.save()
-                disable_validation_checks = False
+                self.disable_validation_checks = False
 
                 # Are there any Organizations with OrgLevel=root ?
                 orgs = Organization.objects.filter(organization_level=root)
@@ -338,14 +443,14 @@ class OrganizationLevel(TimeStampedModel):
             child = OrganizationLevel.objects.filter(parent=parent)
             if exists(child):
                 # Child queryset not empty, set child to first
-                child = next(child)
+                child = child[0]
                 # Parent has a child, we go in between
                 if not level > child.level:
                     raise ValidationError( 'Attempt to install new orglevel '
                         '{} with level {} is less than child '
                         '{} with level {}'.format(
                         name, level, child, child.level))
-                disable_validation_checks = True
+                self.disable_validation_checks = True
                 newolev = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newolev.save()
@@ -353,7 +458,7 @@ class OrganizationLevel(TimeStampedModel):
                 child.save()
                 newolev.parent = parent
                 newolev.save()
-                disable_validation_checks = False
+                self.disable_validation_checks = False
 
                 # Are there any Organizations with OrgLevel=child ?
                 orgs = Organization.objects.filter(organization_level=child)
@@ -416,13 +521,13 @@ class OrganizationLevel(TimeStampedModel):
             child = cls.objects.filter(parent=self)
             if exists(child):
                 # Have parent and child
-                child = next(child)
+                child = child[0]
 
                 # Set the child's parent to parent
-                disable_validation_checks = True
+                self.disable_validation_checks = True
                 child.parent = self.parent
                 self.delete()
-                disable_validation_checks = False
+                self.disable_validation_checks = False
                 return
             else:
                 # Have a parent but no child
@@ -435,11 +540,11 @@ class OrganizationLevel(TimeStampedModel):
             if exists(child):
                 # Have child but no parent
                 # Make child new root level
-                disable_validation_checks = True
+                self.disable_validation_checks = True
                 child.parent = None
                 child.save()
                 self.delete()
-                disable_validation_checks = False
+                self.disable_validation_checks = False
                 return
             else:
                 # No parent or child.  So this is the only OrgLevel
@@ -574,6 +679,56 @@ class Organization(TimeStampedModel):
         else:
             return defobj.pk
 
+    def update_organization_from_dict(self, new):
+        """Updates Organization to match dictionary.
+
+        The fields of the invocant will be updated to match the
+        fields of the dictionary new.  Fields not present in the
+        dictionary new are ignored/left unchanged.
+
+        Returns None if no fields have been changed, or a 
+        dictionary with keys and values of fields which have been changed.
+        """
+        retval = {}
+        for key, value in new.items():
+            if key == 'code':
+                if self.code != value:
+                    self.code = value
+                    retval['code']= value
+            elif key == 'shortname':
+                if self.shortname != value:
+                    self.shortname = value
+                    retval['shortname']= value
+            elif key == 'longname':
+                if self.longname != value:
+                    self.longname = value
+                    retval['longname']= value
+            elif key == 'organization_level':
+                if self.organization_level != value:
+                    self.organization_level = value.pk
+                    retval['organization_level']= value
+            elif key == 'parent':
+                if self.parent != value:
+                    self.parent = value.pk
+                    retval['parent']= value
+            elif key == 'is_selectable_for_user':
+                if self.is_selectable_for_user != value:
+                    self.is_selectable_for_user = value
+                    retval['is_selectable_for_user']= value
+            elif key == 'is_selectable_for_project':
+                if self.is_selectable_for_project != value:
+                    self.is_selectable_for_project = value
+                    retval['is_selectable_for_project']= value
+            else:
+                raise ValueError('No field {} for {}\n'.format(
+                    key, self))
+
+        if retval:
+            self.save()
+        else:
+            retval = None
+        return retval
+
     def ancestors(self):
         """Returns of list ref of all ancestors.
 
@@ -650,6 +805,52 @@ class Organization(TimeStampedModel):
 
         # Nothing matched
         return None
+
+    @classmethod
+    def create_or_update_organization(self, new):
+        """Creates or Updates Organization as needed.
+
+        This method will check if an organization with code and
+        parent as given by fields of new.  If no such Organization
+        was found, a new Organization is created using the arguments
+        from the dictionary new.
+
+        If such an Organization is found, it is updated to match
+        the fields listed in new.  Any fields not present as keys to new
+        will not be updated.
+
+        Returns a triplet consisting of the Organization found or created,
+        a boolean indicating if a new object was created, and a (possibly
+        empty) dictionary with the key/values of the fields which have been
+        changed.
+        """
+        created = False
+        changed = {}
+        if 'code' in new:
+            code = new['code']
+        else:
+            raise ValueError('The new dictionary must have a key "code"')
+
+        if 'parent' in new:
+            parent = new['parent']
+        else:
+            parent = None
+
+        if parent is None:
+            qset = Organization.objects.filter(code=code, parent__isnull=True)
+        else:
+            qset = Organization.objects.filter(code=code, parent=parent)
+
+        if qset:
+            # Found a match, so update
+            org = qset[0]
+            changed = org.update_organization_from_dict(new)
+        else:
+            # No matches, create a new Org
+            org = Organization.objects.create(**new)
+            created = True
+            changed = new
+        return org, created, changed
 
     @classmethod
     def get_organization_by_fullcode(cls, fullcode):

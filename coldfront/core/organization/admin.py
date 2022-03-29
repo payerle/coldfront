@@ -14,6 +14,7 @@ class OrganizationLevelAdmin(admin.ModelAdmin):
         'name',
         'level',
         'parent',
+        'export_to_xdmod',
     )
     search_fields = ['name', 'level']
 
@@ -38,6 +39,11 @@ class OrganizationAdmin(admin.ModelAdmin):
         'is_selectable_for_project',
     )
     search_fields = ['code',]
+    list_filter = ( 
+            'organization_level', 
+            'is_selectable_for_user',
+            'is_selectable_for_project',
+            )
 
 
 @admin.register(Directory2Organization)
