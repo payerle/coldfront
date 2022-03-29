@@ -5,7 +5,7 @@ from django.db import models
 from model_utils.models import TimeStampedModel
 from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
-from django.db.models import Q
+from django.db.models import Q, Max
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +88,12 @@ class OrganizationLevel(TimeStampedModel):
                         plevel))
         else:
             # No parent, make sure we are the highest level in table
-            count = OrganizationLevel.objects.count()
-            if count > 0:
+            maxlevel = list(OrganizationLevel.objects.aggregate(
+                    Max('level')).values())[0]
+            if maxlevel > self.level:
                 raise ValidationError( 'OrganizationLevel {}, level={} '
-                    'has no parent, but {} other rows in table' .format(
-                        self, self.level, count))
-
-
+                    'has no parent, but max level={}' .format(
+                        self, self.level, maxlevel))
         return
 
     def save(self, *args, **kwargs):
@@ -394,6 +393,8 @@ class OrganizationLevel(TimeStampedModel):
 
         For most cases this method will temporarily disable the validation
         checks (which would otherwise prevent the addition of the org level).
+
+        Returns the newly created OrganizationLevel
         """
         if parent is None:
             # No parent organization
@@ -414,9 +415,11 @@ class OrganizationLevel(TimeStampedModel):
                 root.save()
                 cls.disable_validation_checks = False
 
+                # Delete any cached toplevel unknown org
+                Organization.CACHED_TOPLEVEL_UNKNOWN_ORG = None
                 # Are there any Organizations with OrgLevel=root ?
                 orgs = Organization.objects.filter(organization_level=root)
-                if orgs.exists():
+                if orgs:
                     # Yes, so we need to create a placeholder root Organization
                     rootorg = Organization.get_or_create_unknown_root()
                     # And make that the parent to all previously root-level
@@ -424,14 +427,14 @@ class OrganizationLevel(TimeStampedModel):
                     for org in orgs:
                         org.parent=rootorg
                         org.save()
-                return
+                return newroot
             else:
                 # No root allocation (so no hierarchy)
                 # Just add the first entry
                 newroot = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newroot.save()
-                return
+                return newroot
         else:
             if not parent.level > level:
                 raise ValidationError( 'Attempt to install new orglevel '
@@ -441,7 +444,7 @@ class OrganizationLevel(TimeStampedModel):
 
             # We were given a parent, see if it has a child
             child = OrganizationLevel.objects.filter(parent=parent)
-            if exists(child):
+            if child:
                 # Child queryset not empty, set child to first
                 child = child[0]
                 # Parent has a child, we go in between
@@ -465,7 +468,7 @@ class OrganizationLevel(TimeStampedModel):
                 for org in orgs:
                     # For each Org at OrgLevel=child, we create a new 
                     # placeholder Org to sit between the child and parent Org
-                    uniq_names = Organization.generate_unique_object_names(
+                    uniq_names = Organization.generate_unique_organization_names(
                         code='{}{}'.format('placeholder', org.code),
                         shortname='{}{}'.format('placeholder', org.shortname),
                         longname='{}{}'.format('placeholder', org.longname),
@@ -477,22 +480,27 @@ class OrganizationLevel(TimeStampedModel):
                     neworg.save()
                     org.parent = neworg
                     org.save()
-                return
+                return newolev
             else:
                 # Parent is childless, so simply add
                 newolev = OrganizationLevel(
                         name=name, level=level, parent=parent)
                 newolev.save()
-                return
+                return newolev
 
-    def delete_organization_level(self, replace=None):
+    def delete_organization_level(self):
         """Delete the invocant organization level from the hierarchy.
 
         This deletes the invocant org level, repairing the hierarchy.
-        If replace is given, all Organizations with the Org Level being
-        deleted will have their org level replaced with replace.  If it
-        is left as None, an exception will be raised if any Organizations
-        found with this OrgLevel.
+
+        There must be no Organizations whose organization_level points
+        to the invocant OrganizationLevel which is being deleted.  If
+        there are, an exception will be raised.  You must adjust the
+        Organization tree appropriately beforehand.  As that likely
+        will leave the Organization tree in an invalid state until
+        this OrganizationLevel is deleted, you will likely need to
+        set Organization.disable_validate_checks to True while making
+        those adjustments (and clear after calling this method).
 
         If the orglevel being deleted has no child orglevel, then everything
         is simple.  If it has a child but no parent (i.e. is the root orglevel),
@@ -503,23 +511,19 @@ class OrganizationLevel(TimeStampedModel):
         the validation checks.
         """
         # See if there are any Organizations with invocant OrgLevel.
-        orgs = Organization.objects.filter(parent=self)
-        if exists(orgs):
-            if replace:
-                for org in orgs:
-                    org.organization_level = replace
-                    org.save()
-            else:
-                raise ValidationError( 'Attempt to delete orglevel '
-                    '{} without replacement org and with organization '
-                    '{} referring to it.'.format(
-                        self, ', '.join(orgs)))
+        orgs = Organization.objects.filter(organization_level=self)
+        if orgs:
+            tmp = [ x.fullcode() for x in orgs ]
+            raise ValidationError( 'Attempt to delete orglevel '
+                '{} without replacement org and with organization '
+                '{} referring to it.'.format(
+                    self, ', '.join(tmp)))
 
         # Do we have a parent?
         if self.parent:
             # We have a parent. Do we have a child?
             child = OrganizationLevel.objects.filter(parent=self)
-            if exists(child):
+            if child:
                 # Have parent and child
                 child = child[0]
 
@@ -537,9 +541,10 @@ class OrganizationLevel(TimeStampedModel):
         else:
             # No parent, so we are at root level. Do we have a child?
             child = OrganizationLevel.objects.filter(parent=self)
-            if exists(child):
+            if child:
                 # Have child but no parent
                 # Make child new root level
+                child = child[0]
                 self.disable_validation_checks = True
                 child.parent = None
                 child.save()
@@ -609,6 +614,10 @@ class Organization(TimeStampedModel):
             help_text='This organization can be selected for Projects')
     # This is a cached top-level/root Unknown org, used for defaulting things
     CACHED_TOPLEVEL_UNKNOWN_ORG = None
+    # Disable the validation constraints if true.
+    # Intended for temporary use when adding/deleting OrgLevels (see
+    # add_organization_level and delete_organization_level methods).
+    disable_validation_checks=False
 
     def __str__(self):
         return self.shortname
@@ -626,6 +635,9 @@ class Organization(TimeStampedModel):
 
         # Call base class's clean()
         super().clean()
+
+        if self.disable_validation_checks:
+            return
 
         # Get orglevel and orglevel's parent
         orglevel_obj = self.organization_level
@@ -901,7 +913,7 @@ class Organization(TimeStampedModel):
                 return None
 
     @classmethod
-    def generate_unique_object_names(cls, 
+    def generate_unique_organization_names(cls, 
             code='Unknown', 
             shortname='Unknown', 
             longname='Unknown', 
@@ -982,7 +994,16 @@ class Organization(TimeStampedModel):
             return cls.CACHED_TOPLEVEL_UNKNOWN_ORG
 
         # No value cached in UNKNOWN_ORG, look for one in DB
-        qset = cls.objects.filter(code='Unknown', parent__isnull=True)
+        # To allow this to work when adding a new root orglevel, we
+        # need to search for orglevel having no parent, not for org
+        # to have no parent (between creation of new root and migrating
+        # old root level orgs to new root org, the orgs at old root will
+        # have no parent and be picked up)
+        qset = cls.objects.filter(
+                code='Unknown', 
+                #parent__isnull=True,
+                organization_level__parent__isnull=True,
+                )
         if qset:
             # We got an org with code='Unknown', cache and return first found
             cls.CACHED_TOPLEVEL_UNKNOWN_ORG = qset[0]
@@ -994,18 +1015,12 @@ class Organization(TimeStampedModel):
         orglevel = OrganizationLevel.root_organization_level()
         if not orglevel:
             raise OrganizationLevel.DoesNotExist('No parentless OrganizationLevel found')
-        unique_names = cls.generate_unique_object_names(
+        unique_names = cls.generate_unique_organization_names(
                 parent=None,
                 code='Unknown',
                 shortname='Unknown',
                 longname='Container for Unknown organizations'
                 )
-        if unique_names['code'] != 'Unknown':
-            # This should not happen, we checked for Org with code=Unknown
-            # and no parents
-            raise RuntimeError('Rootlevel organization with code=Unknown '
-                    'seems to exist even though previously reported it '
-                    'did not')
 
         new = cls.objects.create(
                 code=unique_names['code'],
@@ -1041,7 +1056,7 @@ class Organization(TimeStampedModel):
         if unknown_root is not None:
             root_orglevel = unknown_root.organization_level
             orglevel = root_orglevel.child_organization_level()
-        unique_names = cls.generate_unique_object_names(
+        unique_names = cls.generate_unique_organization_names(
                 parent=unknown_root,
                 code='Unknown_placeholder',
                 shortname='Unknown: {}'.format(dirstring),
