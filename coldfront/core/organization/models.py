@@ -1,5 +1,6 @@
 import sys
 import logging
+import warnings
 
 from django.db import models
 from model_utils.models import TimeStampedModel
@@ -53,10 +54,27 @@ class OrganizationLevel(TimeStampedModel):
     # Disable the validation constraints if true.
     # Intended for temporary use when adding/deleting OrgLevels (see
     # add_organization_level and delete_organization_level methods).
-    disable_validation_checks=False
+    # Always use accessor disable_validation_checks for getting/setting
+    # to make it truly behave as class variable
+    _disable_validation_checks=False
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def disable_validation_checks(cls, new=None):
+        """Accessor/mutator for _disable_validation_checks class data member.
+
+        Because of the 'magic' done by django with class variables of Models,
+        we must always use the explicit class name when referring to the
+        class variable, otherwise we can end up with instance-like copies.
+
+        To better support this, always use this accessor/mutator for getting or
+        setting the value.
+        """
+        if new is not None:
+            OrganizationLevel._disable_validation_checks = new
+        return OrganizationLevel._disable_validation_checks
 
     def clean(self):
         """Validation: ensure our parent has a higher level than us
@@ -70,12 +88,13 @@ class OrganizationLevel(TimeStampedModel):
         this is intended for temporary use in add_organization_level
         and delete_organization_level methods.
         """
-        # Skip validation checks if disable_validation_checks
-        if self.disable_validation_checks:
-            return
-
         # First, call base class's version
         super().clean()
+
+        # Skip custom validation checks if disable_validation_checks
+        if self.disable_validation_checks():
+            return
+
         if self.parent:
             # Has a parent, make sure has higher level than us
             plevel = self.parent.level
@@ -91,9 +110,17 @@ class OrganizationLevel(TimeStampedModel):
             maxlevel = list(OrganizationLevel.objects.aggregate(
                     Max('level')).values())[0]
             if maxlevel > self.level:
-                raise ValidationError( 'OrganizationLevel {}, level={} '
+                raise ValidationError('OrganizationLevel {}, level={} '
                     'has no parent, but max level={}' .format(
                         self, self.level, maxlevel))
+            # And that no other parent-less OrgLevels present
+            qset = OrganizationLevel.objects.filter(parent__isnull=True)
+            if qset:
+                tmp = [ x.name for x in qset ]
+                tmpstr = ', '.join(tmp)
+                raise ValidationError('OrganizationLevel {}, level={} '
+                        'has no parent, but [{}] also parentless'.format(
+                            self.name, self.level, tmpstr))
         return
 
     def save(self, *args, **kwargs):
@@ -258,9 +285,11 @@ class OrganizationLevel(TimeStampedModel):
         if validate:
             # In validate mode, make sure the root org level is unique
             if len(qset) > 1:
+                tmp = [ x.name for x in qset ]
+                tmpstr = ', '.join(tmp)
                 raise ValidationError('OrganizationLevel hierarchy '
                     'has multiple parentless members: {}'.format(
-                    ', '.join(list(qset))))
+                        tmp))
         last_orglevel = qset[0]
         retval.append(last_orglevel)
 
@@ -305,8 +334,10 @@ class OrganizationLevel(TimeStampedModel):
         It will also produce a warning if disable_validation_checks is not
         set
         """
-        if cls.disable_validation_checks:
+        if cls.disable_validation_checks():
             logger.warning('OrganizationLevel disable_validation_checks is '
+                'set')
+            warnings.warn('OrganizationLevel disable_validation_checks is '
                 'set')
 
         all_org_levels = OrganizationLevel.objects.all()
@@ -339,7 +370,7 @@ class OrganizationLevel(TimeStampedModel):
             level = orglev.level
             if lastlevel is None:
                 # We must be on root orglevel, no check needed
-                lastlevel = level
+                pass
             else:
                 # Ensure our level is less than parent
                 if not lastlevel > level:
@@ -348,6 +379,7 @@ class OrganizationLevel(TimeStampedModel):
                             'than child OrgLevel {} with level={}'.format(
                                 lastorglev, lastlevel, orglev, level))
             lastorglev = orglev
+            lastlevel = level
 
             name = orglev.name
             if name in allnames:
@@ -407,13 +439,13 @@ class OrganizationLevel(TimeStampedModel):
                         'root {} with level {}'.format(
                         name, level, root, root.level))
                 # Replace root orglevel
-                cls.disable_validation_checks = True
+                cls.disable_validation_checks(True)
                 newroot = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newroot.save()
                 root.parent = newroot
                 root.save()
-                cls.disable_validation_checks = False
+                cls.disable_validation_checks(False)
 
                 # Delete any cached toplevel unknown org
                 Organization.CACHED_TOPLEVEL_UNKNOWN_ORG = None
@@ -453,7 +485,7 @@ class OrganizationLevel(TimeStampedModel):
                         '{} with level {} is less than child '
                         '{} with level {}'.format(
                         name, level, child, child.level))
-                cls.disable_validation_checks = True
+                cls.disable_validation_checks(True)
                 newolev = OrganizationLevel(
                         name=name, level=level, parent=None)
                 newolev.save()
@@ -461,7 +493,7 @@ class OrganizationLevel(TimeStampedModel):
                 child.save()
                 newolev.parent = parent
                 newolev.save()
-                cls.disable_validation_checks = False
+                cls.disable_validation_checks(False)
 
                 # Are there any Organizations with OrgLevel=child ?
                 orgs = Organization.objects.filter(organization_level=child)
@@ -528,10 +560,10 @@ class OrganizationLevel(TimeStampedModel):
                 child = child[0]
 
                 # Set the child's parent to parent
-                self.disable_validation_checks = True
+                self.disable_validation_checks(True)
                 child.parent = self.parent
                 self.delete()
-                self.disable_validation_checks = False
+                self.disable_validation_checks(False)
                 return
             else:
                 # Have a parent but no child
@@ -545,11 +577,11 @@ class OrganizationLevel(TimeStampedModel):
                 # Have child but no parent
                 # Make child new root level
                 child = child[0]
-                self.disable_validation_checks = True
+                self.disable_validation_checks(True)
                 child.parent = None
                 child.save()
                 self.delete()
-                self.disable_validation_checks = False
+                self.disable_validation_checks(False)
                 return
             else:
                 # No parent or child.  So this is the only OrgLevel
@@ -617,10 +649,25 @@ class Organization(TimeStampedModel):
     # Disable the validation constraints if true.
     # Intended for temporary use when adding/deleting OrgLevels (see
     # add_organization_level and delete_organization_level methods).
-    disable_validation_checks=False
+    _disable_validation_checks=False
 
     def __str__(self):
         return self.shortname
+
+    @classmethod
+    def disable_validation_checks(cls, new=None):
+        """Accessor/mutator for _disable_validation_checks class data member.
+
+        Because of the 'magic' done by django with class variables of Models,
+        we must always use the explicit class name when referring to the
+        class variable, otherwise we can end up with instance-like copies.
+
+        To better support this, always use this accessor/mutator for getting or
+        setting the value.
+        """
+        if new is not None:
+            Organization._disable_validation_checks = new
+        return Organization._disable_validation_checks
 
     def clean(self):
         """Validation: Ensure parent is of higher level than us.
@@ -636,7 +683,7 @@ class Organization(TimeStampedModel):
         # Call base class's clean()
         super().clean()
 
-        if self.disable_validation_checks:
+        if self.disable_validation_checks():
             return
 
         # Get orglevel and orglevel's parent
