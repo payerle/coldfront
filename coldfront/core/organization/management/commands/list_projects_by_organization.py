@@ -24,6 +24,15 @@ class Command(BaseCommand):
                 action='append',
                 default=[],
                 )
+        parser.add_argument('--primary_only', '--primary-only',
+                '--primary_organization_only', '--primary_organization',
+                '--primary-organization-only', '--primary-organization', 
+                '--primary_org', '--primary-org',
+                '--primaryorg', '--primary',
+                help='If set, only consider primary organizations in '
+                    'matching projects.  Normally we match projects if '
+                    'either primary or additional_organizations match.',
+                action='store_true',)
         parser.add_argument('--and',
                 help='If multiple Organizations are given, only list projects '
                     'which are found in all of them.  Default is to list '
@@ -55,6 +64,7 @@ class Command(BaseCommand):
         verbosity = options['verbosity']
         descendents = options['descendents']
         statuses = options['status']
+        primary_only = options['primary_only']
 
         projects = set()
         for orgcode in orgcodes:
@@ -66,12 +76,19 @@ class Command(BaseCommand):
             if descendents:
                 orgs.extend(org.descendents())
 
-            myfilter = { 'organizations__in': orgs }
+            myfilter = { 'primary_organization__in': orgs }
             if statuses:
                 myfilter['status__in'] = statuses
             tmpprojects = Project.objects.filter(**myfilter)
 
             tmppset = set(tmpprojects.all())
+            if not primary_only:
+                myfilter = { 'additional_organizations__in': orgs }
+                if statuses:
+                    myfilter['status__in'] = statuses
+                tmpprojects = Project.objects.filter(**myfilter)
+                tmppset = tmppset.union(set(tmpprojects.all()))
+
             if andorgs:
                 projects = projects.intersection(tmppset)
             else:

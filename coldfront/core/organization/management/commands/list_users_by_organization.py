@@ -24,6 +24,15 @@ class Command(BaseCommand):
                 action='append',
                 default=[],
                 )
+        parser.add_argument('--primary_only', '--primary-only',
+                '--primary_organization_only', '--primary_organization',
+                '--primary-organization-only', '--primary-organization',
+                '--primary_org', '--primary-org',
+                '--primaryorg', '--primary',
+                help='If set, only consider primary organizations in '
+                    'matching users.  Normally we match users if '
+                    'either primary or additional_organizations match.',
+                action='store_true',)
         parser.add_argument('--and',
                 help='If multiple Organizations are given, only list users '
                     'which are found in all of them.  Default is to list users '
@@ -52,6 +61,7 @@ class Command(BaseCommand):
         andorgs = options['and']
         verbosity = options['verbosity']
         descendents = options['descendents']
+        primary_only = options['primary_only']
 
         users = set()
         for orgcode in orgcodes:
@@ -64,9 +74,14 @@ class Command(BaseCommand):
                 orgs.extend(org.descendents())
 
             tmpusers = UserProfile.objects.filter(
-                    organizations__in=orgs)
+                    primary_organization__in=orgs)
 
             tmpuset = set(tmpusers.all())
+            if not primary_only:
+                myfilter = { 'additional_organizations__in': orgs }
+                tmpusers = UserProfile.objects.filter(**myfilter)
+                tmpuset = tmpuset.union(set(tmpusers.all()))
+
             if andorgs:
                 users = users.intersection(tmpuset)
             else:
