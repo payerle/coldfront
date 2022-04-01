@@ -47,7 +47,7 @@ We do not have information about your research. Please provide a detailed descri
     force_review = models.BooleanField(default=False)
     requires_review = models.BooleanField(default=True)
     history = HistoricalRecords()
-    primary_organization = models.ForeignKey(Organization, 
+    primary_organization = models.ForeignKey(Organization,
             null=True,
             on_delete=models.PROTECT,
             )

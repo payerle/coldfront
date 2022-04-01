@@ -100,11 +100,14 @@ def slurm_dump_cluster(cluster, fname, noop=False):
     cmd = SLURM_CMD_DUMP_CLUSTER.format(shlex.quote(cluster), shlex.quote(fname))
     _run_slurm_cmd(cmd, noop=noop)
 
-def allocations_with_slurm_accounts():
+def allocations_with_slurm_accounts(orderby=None):
     """Returns a list of Allocations which have slurm_account_name Attribute.
 
     This searches all Allocations which have an AllocationAttribute with type
     given by SLURM_ACCOUNT_ATTRIBUTE_NAME.
+
+    If orderby is given, itashould be a list which will be passed as 
+    argument of order_by on query on AllocationAttributes.
 
     It returns a list consisting of dictionaries with keys:
         allocation: The Allocation instance
@@ -112,15 +115,18 @@ def allocations_with_slurm_accounts():
     """
     if SLURM_ACCOUNT_ATTRIBUTE_NAME:
         aaname = SLURM_ACCOUNT_ATTRIBUTE_NAME
-    else
+    else:
         aaname = 'slurm_account_name'
 
     aattribs = AllocationAttribute.objects.select_related('allocation').filter(
             allocation_attribute_type__name=aaname)
-    retval = [list(map(lambda x: 
+    if orderby is not None:
+        aattribs = aattribs.order_by(*orderby)
+
+    retval = list(map(lambda x: 
         {   'allocation': x.allocation, 'account_name': x.value },
-        aattribs)) ]
-    return retvals
+        aattribs))
+    return retval
 
 
 

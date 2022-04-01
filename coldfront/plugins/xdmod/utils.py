@@ -3,16 +3,22 @@ import requests
 import json
 import xml.etree.ElementTree as ET
 import re
+import sys
 
 from coldfront.core.utils.common import import_from_settings
 from coldfront.core.organization.models import (
         OrganizationLevel,
         Organization,
         )
+from coldfront.core.allocation.models import (
+        Allocation,
+        AllocationAttribute,
+        )
 from coldfront.plugins.slurm.utils import (
         SLURM_ACCOUNT_ATTRIBUTE_NAME,
         allocations_with_slurm_accounts,
         )
+from django.contrib.auth.models import User
 
 
 XDMOD_CLOUD_PROJECT_ATTRIBUTE_NAME = import_from_settings('XDMOD_CLOUD_PROJECT_ATTRIBUTE_NAME', 'Cloud Account Name')
@@ -26,39 +32,51 @@ XDMOD_API_URL = import_from_settings('XDMOD_API_URL')
 XDMOD_MAX_HIERARCHY_TIERS  = import_from_settings(
         'XDMOD_MAX_HIERARCHY_TIERS', 3)
 # Booleans.  If set, allocation and/or project appears in XdMod hierarchy
-XDMOD_ALLOCATION_IN HIERARCHY = import_from_settings(
+XDMOD_ALLOCATION_IN_HIERARCHY = import_from_settings(
         'XDMOD_ALLOCATION_IN_HIERARCHY', 0)
-XDMOD_PROJECT_IN HIERARCHY = import_from_settings(
+XDMOD_PROJECT_IN_HIERARCHY = import_from_settings(
         'XDMOD_PROJECT_IN_HIERARCHY', 0)
 # Info and label fields to use in hierarchy.json for Allocation or Project tier
-XDMOD_ALLOCATION_HIERARCHY_LABEL = import(
+XDMOD_ALLOCATION_HIERARCHY_LABEL = import_from_settings(
         'XDMOD_ALLOCATION_HIERARCHY_LABEL', 'Allocation')
-XDMOD_ALLOCATION_HIERARCHY_INFO = import(
+XDMOD_ALLOCATION_HIERARCHY_INFO = import_from_settings(
         'XDMOD_ALLOCATION_HIERARCHY_INFO', 'Allocation')
-XDMOD_PROJECT_HIERARCHY_LABEL = import(
+XDMOD_PROJECT_HIERARCHY_LABEL = import_from_settings(
         'XDMOD_PROJECT_HIERARCHY_LABEL', 'Project')
-XDMOD_PROJECT_HIERARCHY_INFO = import(
+XDMOD_PROJECT_HIERARCHY_INFO = import_from_settings(
         'XDMOD_PROJECT_HIERARCHY_INFO', 'Project')
 # If XDMOD_ALLOCATION_IN_HIERARCHY is set, look for these AllocationAttributes
 # for the naming the generated hierachy entries
-XDMOD_ALLOCATION_HIERARCHY_CODE_ATTRIBUTE_NAME = import(
+XDMOD_ALLOCATION_HIERARCHY_CODE_ATTRIBUTE_NAME = import_from_settings(
     'XDMOD_ALLOCATION_HIERARCHY_CODE_ATTRIBUTE_NAME', 'xdmod_alloc_code')
-XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME = import(
+XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME = import_from_settings(
     'XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME', 'xdmod_alloc_name')
 # If XDMOD_ALLOCATION_IN_HIERARCHY is set and the above AllocationAttributes
 # are not set, use the slurm_account_name with following prefix/suffix
-XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX = import(
+XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX = import_from_settings(
     'XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX', '')
-XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX = import(
+XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX = import_from_settings(
     'XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX', '')
 # If XDMOD_PROJECT_IN_HIERARCHY is set, these are used for naming of the
 # Project level hierarchy entries
-XDMOD_PROJECT_HIERARCHY_CODE_MODE = import(
+XDMOD_PROJECT_HIERARCHY_CODE_MODE = import_from_settings(
     'XDMOD_PROJECT_HIERARCHY_CODE_MODE', 'pi_username')
-XDMOD_PROJECT_HIERARCHY_CODE_PREFIX = import(
+XDMOD_PROJECT_HIERARCHY_CODE_PREFIX = import_from_settings(
     'XDMOD_PROJECT_HIERARCHY_CODE_PREFIX', '')
-XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX = import(
+XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX = import_from_settings(
     'XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX', '')
+XDMOD_PROJECT_HIERARCHY_CODE_ATTRIBUTE_NAME = import_from_settings(
+    'XDMOD_PROJECT_HIERARCHY_CODE_ATTRIBUTE_NAME', '')
+# These control the first_name and last_name fields for XdMod names.csv
+# for Users.  The string is processed with the Python format() method,
+# passing arguments fname, lname, username, email for the User's 
+# first_name, last_name, username, and email fields.
+# If None, will default to '{fname}' for FNAME and '{lname}' for LNAME
+XDMOD_NAMES_CSV_USER_FNAME_FORMAT = import_from_settings(
+    'XDMOD_NAMES_CSV_USER_FNAME_FORMAT', None)
+XDMOD_NAMES_CSV_USER_LNAME_FORMAT = import_from_settings(
+    'XDMOD_NAMES_CSV_USER_LNAME_FORMAT', None)
+
 
 _ENDPOINT_CORE_HOURS = '/controllers/user_interface.php'
 
@@ -199,18 +217,19 @@ def xdmod_orglevel_hierarchy_list():
 
     if XDMOD_PROJECT_IN_HIERARCHY:
         org_level_hier.append('project')
-    if XDMOD_ALLOCATION_HIERARCHY:
+    if XDMOD_ALLOCATION_IN_HIERARCHY:
         org_level_hier.append('allocation')
 
-    # Remove any orglevels that exceed ORG_MAX_XDMOD_ORGLEVELS, from 
+    # Remove any orglevels that exceed XDMOD_MAX_HIERARCHY_TIERS, from 
     # root side
-    max = ORG_MAX_XDMOD_ORGLEVELS
-    excess = len(org_level_hier)
+    max = XDMOD_MAX_HIERARCHY_TIERS
+    excess = len(org_level_hier) - max
     if excess > 0:
         org_level_hier = org_level_hier[excess:]
 
     # We reverse to get in leaf to root order
-    return reverse(org_level_hier)
+    org_level_hier.reverse()
+    return org_level_hier
 
 def generate_xdmod_orglevel_hierarchy_setup():
     """This method generates an XdMod hierarchy.json data structure.
@@ -257,12 +276,12 @@ def generate_xdmod_orglevel_hierarchy_setup():
             info = XDMOD_PROJECT_HIERARCHY_INFO
         else:
             # We must have an OrganizationLevel
-            label = orglev.shortname
-            info = orglev.longname
+            label = orglev.name
+            info = orglev.name
 
         xdmod_level = xdmod_levels[i]
-        hier_dict['{}_level_label'.format(xdmod_level)] = orglev.shortname
-        hier_dict['{}_level_info'.format(xdmod_level)] = orglev.longname
+        hier_dict['{}_level_label'.format(xdmod_level)] = label
+        hier_dict['{}_level_info'.format(xdmod_level)] = info
         i = i + 1
 
     # Put dummy entries on any remaining hierarchy levels
@@ -301,17 +320,24 @@ def xdmod_hier_code_for_project(project):
             value of XDMOD_PROJECT_HIERARCHY_CODE_ATTRIBUTE_NAME, and if so
             use the value of that attribute as the basename.  If no such 
             AllocationAttribute is found, we pass to the next mode in the list.
+            If multiple allocations have that attribute set, we use the
+            one associated with allocation with the lowest pk (you really 
+            should ensure all have the same value of the attribute in this
+            case).
     Of the above, only the value 'attribute' can allow passing to the next
     mode in the list.  If XDMOD_PROJECT_HIERARCHY_CODE_MODE does not have a
-    value, or we run out of modes before getting a value, we will defulat
+    value, or we run out of modes before getting a value, we will default
     to 'pi_username'.
     
-    This basename will be prefixed/suffixed by the strings from the
-    XDMOD_PROJECT_HIERARCHY_CODE_PREFIX and XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX.
+    Unless the basename was set via the 'attribute' mode, it will then
+    be prefixed/suffixed by the strings from the
+    XDMOD_PROJECT_HIERARCHY_CODE_PREFIX and XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX
+    to produce the final 'code'.  For the 'attribute' mode case, the basename
+    becomes the code w/out any additional prefix/suffix.
 
     Returns the tuple code, name
     """
-    name = self.title
+    name = project.title
     code = None
 
     modes = []
@@ -320,13 +346,14 @@ def xdmod_hier_code_for_project(project):
     modes.append('pi_username')
 
     basename = None
+    noprefixsuffix = False
     for mode in modes:
         if mode == 'pi_username':
-                basename = self.pi.username
+                basename = project.pi.username
                 break
 
         if mode == 'title':
-            basename = self.title
+            basename = project.title
             basename = re.sub('[^a-zA-Z_-]', '_', basename)
             break
 
@@ -337,39 +364,47 @@ def xdmod_hier_code_for_project(project):
 
         # -slurm_account_name/+slurm_account_name/attribute all are based
         # on Allocations belonging to the Project
-        allocs = Allocation.objects.filter(project=self)
+        allocs = Allocation.objects.filter(project=project)
 
         if mode == 'attribute':
             tmp = AllocationAttribute.objects.filter(
-                    allocation__project=self,
+                    allocation__project=project,
                     allocation_attribute_type__name=
-                    XDMOD_PROJECT_HIERARCHY_CODE_ATTRIBUTE_NAME)
-            if not empty(tmp):
+                    XDMOD_PROJECT_HIERARCHY_CODE_ATTRIBUTE_NAME).order_by(
+                            'allocation__pk')
+            if tmp:
                 basename = tmp[0].value
+                noprefixsuffix = True
                 break
+            continue
             
         # slurm_account_name variants all want AllocationAttributes with
         # of type given by SLURM_ACCOUNT_ATTRIBUTE_NAME.  
         tmp = AllocationAttribute.objects.filter(
-                allocation__project=self,
-                allocation_attribute_type__name-SLURM_ACCOUNT_ATTRRIBUTE_NAME)
-        slurm_acct_names = map(lambda x: x.value, tmp)
+                allocation__project=project,
+                allocation_attribute_type__name=SLURM_ACCOUNT_ATTRIBUTE_NAME)
+        slurm_acct_names = list(map(lambda x: x.value, tmp))
         slurm_acct_names.sort()
         if mode == '-slurm_account_name' or mode == 'slurm_account_name':
             basename = slurm_acct_names[0]
         elif mode == '+slurm_account_name':
-            basename == slurm_acct_names[-1]
+            basename = slurm_acct_names[-1]
         else:
             raise ValueError('Illegal value {} in '
                     'XDMOD_PROJECT_HIERARCHY_CODE_MODE'.format(mode))
+        break
+    #end for mode in modes:
 
-    prefix = ''
-    suffix = ''
-    if XDMOD_PROJECT_HIERARCHY_CODE_PREFIX:
-        prefix = XDMOD_PROJECT_HIERARCHY_PREFIX
-    if XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX:
-        suffix = XDMOD_PROJECT_HIERARCHY_SUFFIX
-    code = '{}{}{}'.format(prefix, basename, suffix)
+    if noprefixsuffix:
+        code = basename
+    else:
+        prefix = ''
+        suffix = ''
+        if XDMOD_PROJECT_HIERARCHY_CODE_PREFIX:
+            prefix = XDMOD_PROJECT_HIERARCHY_CODE_PREFIX
+        if XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX:
+            suffix = XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX
+        code = '{}{}{}'.format(prefix, basename, suffix)
 
     return code, name
 
@@ -401,41 +436,31 @@ def xdmod_hier_code_for_allocation(allocation, account_name=None):
         tmp = AllocationAttribute.objects.filter(
                 allocation_attribute_type__name=
                 XDMOD_ALLOCATION_HIERARCHY_CODE_ATTRIBUTE_NAME,
-                allocation=self)
-        if not empty(tmp):
+                allocation=allocation)
+        if tmp:
             code = tmp[0].value
 
     if code is None:
         if account_name is None:
             tmp = AllocationAttribute.objects.filter(
                 allocation_attribute_type__name=SLURM_ACCOUNT_ATTRIBUTE_NAME,
-                allocation=self)
+                allocation=allocation)
             account_name = tmp[0].value
         base = account_name
         prefix = ''
         suffix = ''
         if XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX:
-            tmp = AllocationAttribute.objects.filter(
-                    allocation_attribute_type__name=
-                    XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX,
-                    allocation=self)
-            if not empty(tmp):
-                prefix = tmp[0].value
+            prefix = XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX
         if XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX:
-            tmp = AllocationAttribute.objects.filter(
-                    allocation_attribute_type__name=
-                    XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX,
-                    allocation=self)
-            if not empty(tmp):
-                prefix = tmp[0].value
+            suffix = XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX
         code = '{}{}{}'.format(prefix,base,suffix)
 
     if XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME:
         tmp = AllocationAttribute.objects.filter(
                 allocation_attribute_type__name=
                 XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME,
-                allocation=self)
-        if not empty(tmp):
+                allocation=allocation)
+        if tmp:
             name = tmp[0].value
 
     if name is None:
@@ -482,21 +507,28 @@ def generate_xdmod_org_hierarchy():
     last_orglev = None
     exported_org_by_org = {}
 
-    nextii = 0
+    nexti = 0
     for orglev in org_level_hier:
+        hier_list_for_olev = []
         nexti = nexti + 1
         if nexti < len(org_level_hier):
             nextorglev = org_level_hier[nexti]
-        else
+        else:
             nextorglev = None
 
         projs_hash = None
         if orglev == 'allocation':
-            alist = allocations_with_slurm_accounts()
+            alist = allocations_with_slurm_accounts(orderby=['allocation__pk'])
+            handled_by_code = {}
             for arec in alist:
                 alloc = arec['allocation']
                 aname = arec['account_name']
                 code, name = xdmod_hier_code_for_allocation(alloc, aname)
+                if code in handled_by_code:
+                    # Already processed an allocation with this code
+                    continue #for arec in alist
+                else:
+                    handled_by_code[code] = name
                 # Now need the parent
                 if XDMOD_PROJECT_IN_HIERARCHY:
                     # Parent is project containing alloc
@@ -504,15 +536,15 @@ def generate_xdmod_org_hierarchy():
                     pcode, pname = xdmod_hier_code_for_project(proj)
                     if projs_hash is None:
                         projs_hash = {}
-                    projs_hash{proj} = {
+                    projs_hash[proj] = {
                             'project': proj,
                             'code': pcode,
                             'name': pname,
                             }
                     parent = pcode
-                    if nextorglev = None:
+                    if nextorglev is None:
                         parent = None
-                else:
+                else: #if XDMOD_PROJECT_IN_HIERARCHY
                     # Next level is not project, so we want primary_org of
                     # project, or first ancestor exported to xdmod
                     proj = alloc.project
@@ -526,52 +558,64 @@ def generate_xdmod_org_hierarchy():
                         exported_org_by_org[org] = xdmod_org
                         if nextorglev is None:
                             parent = None
-                    else
+                    else: #if org is not None 
                         parent = None
+                    # end: if org is not None
                     if projs_hash is None:
                         projs_hash = {}
-                    projs_hash{proj} = {
+                    projs_hash[proj] = {
                             'project': proj,
                             'parent': parent,
                             }
-                hier_list.append( (code, name, parent) )
-                # End for arec in alist
-            continue
-        elif orglev == 'project':
+                # end: if XDMOD_PROJECT_IN_HIERARCHY
+                hier_list_for_olev.append( (code, name, parent) )
+            # End for arec in alist
+            # prepend elements of hier_list_for_ovel to hier_list
+            hier_list[:0] = hier_list_for_olev
+            continue # for orglev in org_level_hier:
+        elif orglev == 'project': #if orglev == 'allocation':
             if projs_hash is None:
                 # Previous org level was not 'allocation'
                 # So we start from scratch
                 projs_hash = {}
-                alist = allocations_with_slurm_accounts()
+                alist = allocations_with_slurm_accounts(
+                        orderby=['allocation__project__pi__username', 
+                            'allocation__project__title'])
                 for arec in alist:
                     alloc = arec['allocation']
                     proj = alloc.project
+                    if proj in projs_hash:
+                        # We already handled this Project
+                        continue
                     code, name = xdmod_hier_code_for_project(proj)
-                    org = proj.primary_allocation
+                    org = proj.primary_organization
                     if org is None:
                         parent = None
-                    elif org in exported_org_by_org:
+                    elif org in exported_org_by_org: #if org is None
                         parent_org = exported_org_by_org[org]
                         if parent_org is None:
-                            parent = None:
+                            parent = None
                         else:
                             parent = parent_org.fullcode()
-                    else:
+                    else: #if org is None
                         parent_org = org.next_xdmod_exported_organization()
                         exported_org_by_org[org] = parent_org
                         if parent_org is None:
                             parent = None
                         else:
                             parent = parent_org.fullcode()
+                    # end: if org is None
                     if nextorglev is None:
                         parent = None
-                    hier_list.append( (code, name, parent) )
-            else:
+                    hier_list_for_olev.append( (code, name, parent) )
+                    projs_hash[proj] = (code, name, parent)
+                #end: for arec in alist
+            else: #if projs_hash is None
                 # Previous org level was 'allocation', so a lot of work
                 # already done
                 if projs_hash is None:
                     # No projects to add
-                    continue
+                    continue # for orglev in org_level_hier:
                 for key, prec in projs_hash.items():
                     proj = prec['project']
                     if code in prec:
@@ -580,36 +624,42 @@ def generate_xdmod_org_hierarchy():
                         org = proj.primary_organization
                         if org is None:
                             parent = None
-                        elif org in exported_org_by_org:
+                        elif org in exported_org_by_org: #if org is None
                             parent_org = exported_org_by_org[org]
                             if parent_org is None:
                                 parent = None
                             else:
                                 parent = parent_org.fullcode()
-                        else:
+                        else: #if org is None
                             parent_org = org.next_xdmod_exported_organization()
                             exported_org_by_org[org] = parent_org
                             if parent_org is None:
                                 parent = None
+                        # end if org is None
                         if nextorglev is None:
                             parent = None
-                        hier_list.append( (code, name, parent) )
-                    else:
+                        hier_list_for_olev.append( (code, name, parent) )
+                    else: #if code in prec
                         parent = prec['parent']
                         code, name = xdmod_hier_code_for_project(proj)
-                    hier_list.append( (code, name, parent) )
-            continue
-        else:
+                    #end if code in prec
+                    hier_list_for_olev.append( (code, name, parent) )
+                #end for key, prec in projs_hash.items()
+            #end if projs_hash is None
+            # prepend elements of hier_list_for_ovel to hier_list
+            hier_list[:0] = hier_list_for_olev
+            continue # for orglev in org_level_hier:
+        else: #if orglev == 'allocation':
             # orglev is an OrganizationLevel
             # Find all Organizations at this OrganizationLevel
             orgs = Organization.objects.filter(organization_level=orglev)
             for org in orgs:
                 code = org.fullcode()
-                name = org.shortname()
+                name = org.shortname
                 parent_org = org.parent
                 if parent_org is None:
                     parent = None
-                elif parent_org in exported_org_by_org:
+                elif parent_org in exported_org_by_org: #if parent_org is None
                     porg = exported_org_by_org[parent_org]
                     if porg is None:
                         parent = None
@@ -617,18 +667,21 @@ def generate_xdmod_org_hierarchy():
                         parent = porg.fullcode()
                     if nextorglev is None:
                         parent = None
-                else:
+                else: #if parent_org is None
                     porg = parent_org.next_xdmod_exported_organization()
                     if porg is None:
                         parent = None
                     else:
                         exported_org_by_org[parent_org] = porg
                         parent = porg.fullcode()
-                else:
+                #end if parent_org is None
                 if nextorglev is None:
                     parent = None
-                hier_list.append( (code, name, parent) )
-            continue
+                hier_list_for_olev.append( (code, name, parent) )
+            #end for org in orgs
+            # prepend elements of hier_list_for_ovel to hier_list
+            hier_list[:0] = hier_list_for_olev
+            continue # for orglev in org_level_hier:
     # End for orglev in org_level_hier:
     return hier_list
 
@@ -647,13 +700,13 @@ def generate_xdmod_group_to_hierarchy():
     will return.
     """
     org_level_hier = xdmod_orglevel_hierarchy_list()
-    orglev = next(org_level_hier)
+    orglev = list(org_level_hier)[0]
     group_list = []
 
     alist = allocations_with_slurm_accounts()
     for arec in alist:
         alloc = arec['allocation']
-        aname = arec['acount_name']
+        aname = arec['account_name']
 
         if orglev == 'allocation':
             code, name = xdmod_hier_code_for_allocation(alloc)
@@ -667,10 +720,66 @@ def generate_xdmod_group_to_hierarchy():
             org = proj.primary_organization
             if org is not None:
                 parent_org = org.next_xdmod_exported_organization()
-                if parent_org is None=:
+                if parent_org is None:
                     code = None
                 else:
                     code = parent_org.fullcode()
             group_list.append( (aname, code) )
 
     return group_list
+
+def generate_xdmod_names_for_users():
+    """This method generates usernames to names for XdMod names.csv
+
+    This generates a Python list with the data relating usernames to
+    real names which can be used for generating the names.csv file.
+    The elements of the list are triplets of form (username, first_name,
+    last_name).
+
+    We produce an entry for all User objects which have an username set,
+    and the username will be used in the username elements.  The first_name
+    and last_name elements are generated according to the values of
+    XDMOD_NAMES_CSV_USER_FNAME_FORMAT and XDMOD_NAMES_CSV_USER_FNAME_FORMAT
+    variables.  If the value of either of these are None, they are defaulted
+    to '{fname}' and '{lname}', respectively.
+
+    The values for the first_name and last_name elements are obtained by
+    taking the variables above and processing with the standard Python
+    format() method, which is passed the parameters:
+        fname: Set to the value of the User's first_name field
+        lname: Set to the value of the User's last_name field
+        username: Set to the value of the User's username field
+        email: Set to the value of the USer's email field
+    """
+    if XDMOD_NAMES_CSV_USER_FNAME_FORMAT is None:
+        fname_format = '{fname}'
+    else:
+        fname_format = XDMOD_NAMES_CSV_USER_FNAME_FORMAT
+    if XDMOD_NAMES_CSV_USER_LNAME_FORMAT is None:
+        lname_format = '{lname}'
+    else:
+        lname_format = XDMOD_NAMES_CSV_USER_LNAME_FORMAT
+
+    user_list = []
+
+    users = User.objects.all().order_by('username')
+    for user in users:
+        uname = user.username
+        email = user.email
+        fname = user.first_name
+        lname = user.last_name
+        if uname:
+            fname_val = fname_format.format(
+                    username=uname,
+                    fname=fname,
+                    lname=lname,
+                    email=email,
+                    )
+            lname_val = lname_format.format(
+                    username=uname,
+                    fname=fname,
+                    lname=lname,
+                    email=email,
+                    )
+            user_list.append( (uname, fname_val, lname_val) )
+    return user_list

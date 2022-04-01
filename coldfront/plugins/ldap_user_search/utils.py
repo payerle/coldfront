@@ -20,8 +20,10 @@ class LDAPUserSearch(UserSearch):
         self.LDAP_USER_SEARCH_BASE = import_from_settings('LDAP_USER_SEARCH_BASE')
         self.LDAP_BIND_DN = import_from_settings('LDAP_USER_SEARCH_BIND_DN', None)
         self.LDAP_BIND_PASSWORD = import_from_settings('LDAP_USER_SEARCH_BIND_PASSWORD', None)
+        self.LDAP_CONNECT_TIMEOUT = import_from_settings('LDAP_USER_SEARCH_CONNECT_TIMEOUT', 2.5)
+        self.LDAP_USE_SSL = import_from_settings('LDAP_USER_SEARCH_USE_SSL', True)
 
-        self.server = Server(self.LDAP_SERVER_URI, use_ssl=True, connect_timeout=1)
+        self.server = Server(self.LDAP_SERVER_URI, use_ssl=self.LDAP_USE_SSL, connect_timeout=self.LDAP_CONNECT_TIMEOUT)
         self.conn = Connection(self.server, self.LDAP_BIND_DN, self.LDAP_BIND_PASSWORD, auto_bind=True)
 
     def parse_ldap_entry(self, entry):
@@ -35,7 +37,7 @@ class LDAPUserSearch(UserSearch):
             'source': self.search_source,
             'directory_strings': entry_dict.get(
                 ORGANIZATION_LDAP_USER_ATTRIBUTE) if entry_dict.get(
-                    ORGANIZATION_LDAP_USER_ATTRIBUTE) else []
+                    ORGANIZATION_LDAP_USER_ATTRIBUTE) else [],
         }
 
         return user_dict

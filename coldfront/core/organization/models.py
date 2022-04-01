@@ -105,22 +105,28 @@ class OrganizationLevel(TimeStampedModel):
                         self.level,
                         self.parent, 
                         plevel))
-        else:
-            # No parent, make sure we are the highest level in table
-            maxlevel = list(OrganizationLevel.objects.aggregate(
-                    Max('level')).values())[0]
-            if maxlevel > self.level:
-                raise ValidationError('OrganizationLevel {}, level={} '
-                    'has no parent, but max level={}' .format(
-                        self, self.level, maxlevel))
-            # And that no other parent-less OrgLevels present
-            qset = OrganizationLevel.objects.filter(parent__isnull=True)
+        else: #if self.parent
+            # No parent
+            # Are there any other OrganizationLevels
+            qset = OrganizationLevel.objects.all()
             if qset:
-                tmp = [ x.name for x in qset ]
-                tmpstr = ', '.join(tmp)
-                raise ValidationError('OrganizationLevel {}, level={} '
-                        'has no parent, but [{}] also parentless'.format(
-                            self.name, self.level, tmpstr))
+                #Yes, make sure we are the highest level in table
+                maxlevel = list(qset.aggregate(Max('level')).values())[0]
+                if maxlevel > self.level:
+                    raise ValidationError('OrganizationLevel {}, level={} '
+                        'has no parent, but max level={}' .format(
+                            self, self.level, maxlevel))
+                # And that no other parent-less OrgLevels present
+                qset2 = qset.filter(parent__isnull=True)
+                if qset2:
+                    tmp = [ x.name for x in qset ]
+                    tmpstr = ', '.join(tmp)
+                    raise ValidationError('OrganizationLevel {}, level={} '
+                            'has no parent, but [{}] also parentless'.format(
+                                self.name, self.level, tmpstr))
+                #end if qset2
+            #end if qset
+        #end if self.parent
         return
 
     def save(self, *args, **kwargs):
@@ -857,7 +863,9 @@ class Organization(TimeStampedModel):
             return self
 
         # Invocant is not of an exported OrgLevel
+        # We reverse to get parent, grandparent, great-grandparent, ... order
         ancestors = self.ancestors()
+        ancestors.reverse()
         for anc in ancestors:
             if anc.organization_level.export_to_xdmod:
                 return anc

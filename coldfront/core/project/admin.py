@@ -86,7 +86,6 @@ class ProjectUserMessageInline(admin.TabularInline):
     fields = ('message', 'author', 'created'),
     readonly_fields = ('author', 'created')
 
-
 class ProjAllOrgsListFilter(admin.SimpleListFilter):
     """Filter for Project Admin page, to filter by Organization.
 
@@ -142,7 +141,6 @@ class ProjAllOrgsListFilter(admin.SimpleListFilter):
         # Union them
         qs1.union(qs2)
         return qs1
-
 
 @admin.register(Project)
 class ProjectAdmin(SimpleHistoryAdmin):
