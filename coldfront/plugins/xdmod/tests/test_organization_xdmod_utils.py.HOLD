@@ -1,0 +1,590 @@
+import sys
+
+from django.core.exceptions import ValidationError 
+from django.db.models import ProtectedError
+from django.test import TestCase
+
+from coldfront.core.organization.models import (
+        OrganizationLevel,
+        Organization,
+        )
+
+import coldfront.plugins.xdmod.utils as xdmod
+
+#from coldfront.plugins.slurm.associations import (
+#        SlurmCluster,
+#        SlurmBase,
+#        )
+
+#from coldfront.plugins.xdmod.utils import (
+#        XDMOD_MAX_HIERARCHY_TIERS,
+#        XDMOD_ALLOCATION_IN_HIERARCHY,
+#        XDMOD_PROJECT_IN_HIERARCHY,
+#        XDMOD_ALLOCATION_HIERARCHY_LABEL,
+#        XDMOD_ALLOCATION_HIERARCHY_INFO,
+#        XDMOD_PROJECT_HIERARCHY_LABEL,
+#        XDMOD_PROJECT_HIERARCHY_INFO,
+#        XDMOD_ALLOCATION_HIERARCHY_CODE_ATTRIBUTE_NAME,
+#        XDMOD_ALLOCATION_HIERARCHY_NAME_ATTRIBUTE_NAME,
+#        XDMOD_ALLOCATION_HIERARCHY_CODE_PREFIX,
+#        XDMOD_ALLOCATION_HIERARCHY_CODE_SUFFIX,
+#        XDMOD_PROJECT_HIERARCHY_CODE_MODE,
+#        XDMOD_PROJECT_HIERARCHY_CODE_PREFIX,
+#        XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX,
+#        )
+#from coldfront.plugins.slurm.utils import (
+#        SLURM_CLUSTER_ATTRIBUTE_NAME,
+#        SLURM_ACCOUNT_ATTRIBUTE_NAME,
+#        SLURM_SPECS_ATTRIBUTE_NAME,
+#        SLURM_USER_SPECS_ATTRIBUTE_NAME,
+#        )
+
+ATTRIBNAME_FOR_CACHED_GLOBALS = 'coldfront_xdmod_orgs_cache'
+
+EXPECTED_DEPT_ORGLEV = {   
+        'name': 'Department',
+        'level': 20,
+        'export_to_xdmod': True,
+        'parent': 'College',
+    }
+EXPECTED_COLL_ORGLEV = {   
+       'name': 'College',
+        'level': 30,
+        'export_to_xdmod': True,
+        'parent': 'University',
+    }
+EXPECTED_UNIV_ORGLEV = {   
+        'name': 'University',
+        'level': 40,
+        'export_to_xdmod': True,
+        'parent': None,
+    }
+
+# Alphabetical by code (not fullcode)
+EXPECTED_ORGLIST_UNIV = [
+        ('UMB', 'UMD Baltimore', None),
+        ('UMD', 'UMCP', None),
+        ('Unknown', 'Unknown', None),
+    ]
+
+# Alphabetical by code (not fullcode)
+EXPECTED_ORGLIST_COLL = [
+        ('UMD-CMNS', 'CMNS', 'UMD'),
+        ('UMD-ENGR', 'Engineering', 'UMD'),
+        ('UMB-SoD', 'Dentistry', 'UMB'),
+        ('UMB-SoM', 'Medicine', 'UMB'),
+    ]
+
+# Alphabetical by code (not fullcode)
+EXPECTED_ORGLIST_DEPT = [
+        ('UMD-CMNS-ASTR', 'Astronomy', 'UMD-CMNS'),
+        ('UMD-ENGR-ENAE', 'Aeronautical Eng', 'UMD-ENGR'),
+        ('UMD-ENGR-ENMA', 'Materials Eng', 'UMD-ENGR'),
+        ('UMB-SoD-NeuPain', 'Neural and Pain', 'UMB-SoD'),
+        ('UMD-CMNS-PHYS', 'Physics', 'UMD-CMNS'),
+        ('UMB-SoD-Perio', 'Periodontics', 'UMB-SoD'),
+        ('UMB-SoM-Psych', 'Psychiatry', 'UMB-SoM'),
+        ('UMB-SoM-Surg', 'Surgery', 'UMB-SoM'),
+    ]
+
+# Alphabetical by ???
+EXPECTED_ORGLIST_PROJ_NOALLOC_PI = [
+        ( 'proj-einstein-prj', 'Gravitational Studies', 'UMD-CMNS-PHYS'),
+        ( 'proj-freud-prj', 'Artificial Id', 'UMB-SoM-Psych'),
+        ( 'proj-hawkeye-prj', 'Meatball Surgery', 'UMB-SoM-Surg'),
+        ( 'proj-orville-prj', 'Hyposonic Flight', 'UMD-ENGR-ENAE'),
+    ]
+
+class Organization2XdmodTest(TestCase):
+    fixtures = ['organization_test_data.json']
+
+    # Helper functions
+    def set_and_cache_xdmod_variable(self, varname, new):
+        """Sets and caches a variable from xdmod, e.g. XDMOD_MAX_HIERARCHY_TIERS"""
+
+        # Get our cache instance variable
+        attribname = ATTRIBNAME_FOR_CACHED_GLOBALS
+        if not hasattr(self, attribname):
+            setattr(self, attribname, {})
+        cache = getattr(self, attribname)
+    
+        # Ensure that varname has been imported
+        #if not varname in globals():
+        if not hasattr(xdmod, varname):
+            raise RuntimeError('Variable {} appears not to be in xdmod'.format(
+                varname))
+
+        #oldval = globals()[varname]
+        oldval = getattr(xdmod,varname)
+
+        if varname in cache:
+            # We already have a value cached for varname
+            olderval = cache[varname]
+            if olderval != oldval:
+                # Values do not match --- error
+                raise RuntimeError('Already have a cached version of {} '
+                    'with value {}, cannot cache'.format(
+                    varname))
+            else:
+                # cached value is same as current, OK
+                pass
+        else:
+            # Cache the current value
+            cache[varname] = oldval
+
+        # And set to new value
+        #globals()[varname] = new
+        setattr(xdmod, varname, new)
+        return new
+
+    def restore_cached_xdmod_variable(self, varname, new):
+        """Restores an xdmod variable cached by set_and_cache_xdmod_variable"""
+
+        # Get our cache instance variable
+        attribname = ATTRIBNAME_FOR_CACHED_GLOBALS
+        if not hasattr(self, attribname):
+            setattr(self, attribname, {})
+        cache = getattr(self, attribname)
+    
+        if varname in cache:
+            # Restore cached value
+            oldval = cache[varname]
+            #globals()[varname] = oldval
+            setattr(xdmod, varname, oldval)
+            del cache[varname]
+        else:
+            raise RuntimeError('Attempt to restore var {} from cache '
+                'but is not cached'.format( varname))
+        return oldval
+
+    def set_and_cache_xdmod_variables(self, varhash):
+        """For each key in dict varhash, call set_and_cache_xdmod_variable"""
+        for varname, newval in varhash.items():
+            self.set_and_cache_xdmod_variable(varname, newval)
+        return
+
+    def restore_cached_xdmod_variables(self, varhash):
+        """For each key in dict varhash, call restore_cached_xdmod_variable"""
+        for varname, newval in varhash.items():
+            self.restore_cached_xdmod_variable(varname, newval)
+        return
+
+    def orglevel_to_dict(self, orglevel):
+        """Convert an OrgLevel to a dict"""
+        if orglevel == 'allocation' or orglevel == 'project':
+            return orglevel
+
+        retval = {
+                'name': orglevel.name,
+                'level': orglevel.level,
+                'export_to_xdmod': orglevel.export_to_xdmod,
+           }
+        if orglevel.parent is None:
+            retval['parent'] = None
+        else:
+            retval['parent'] = orglevel.parent.name
+        return retval
+
+    def orglevels_to_dicts(self, orglevels):
+        """Run orglevel_to_dict on a list of orglevels"""
+        retval = []
+        for orglevel in orglevels:
+            tmp = self.orglevel_to_dict(orglevel)
+            retval.append(tmp)
+        return retval
+
+    def dump_orglevel(self, orglevel):
+        """For debugging: dumps an OrganizationLevel instance to stderr"""
+        if orglevel == 'allocation' or orglevel == 'project':
+            sys.stderr.write('[DEBUG] orglevel={}\n'.format(orglevel))
+            return
+
+        name = orglevel.name
+        level = orglevel.level
+        xport = orglevel.export_to_xdmod
+        sys.stderr.write('[DEBUG] OrgLevel={}:{} (xport={})\n'.format(
+            name, level, xport))
+        return
+
+    def dump_orglevels(self, orglevels):
+        """For debugging: dumps a list of  OrganizationLevels to stderr"""
+        for orglevel in orglevels:
+            self.dump_orglevel(orglevel)
+        return
+
+    def do_xdmod_orglevel_hierarchy_list_test(self, varhash, expected):
+        """Do a test of xdmod_orglevel_hierarchy_list() method.
+
+        Expects a varhash giving desired xdmod settings (e.g. 
+        XDMOD_MAX_HIERARCHY_TIERS, XDMOD_ALLOCATION/PROJECT_IN_HIERARCHY)
+        and the expected output of the xdmod_orglevel_hierarchy_list.
+        """
+        self.set_and_cache_xdmod_variables(varhash)
+        hlist = xdmod.xdmod_orglevel_hierarchy_list()
+
+#        # For debugging
+#        sys.stderr.write('[TPTEST] xdmod_orglevel_hierarchy_list returned:\n---\n')
+#        self.dump_orglevels(hlist)
+#        sys.stderr.write('[TPTEST] ---\n')
+
+        hdict = self.orglevels_to_dicts(hlist)
+        self.restore_cached_xdmod_variables(varhash)
+        self.assertEqual(hdict, expected)
+        return
+
+    def do_hierarchy_json_test(self, varhash, expected):
+        """Do a test of generate_xdmod_orglevel_hierarchy_setup() method.
+
+        Expects a varhash giving desired xdmod settings (e.g. 
+        XDMOD_MAX_HIERARCHY_TIERS, XDMOD_ALLOCATION/PROJECT_IN_HIERARCHY)
+        and the expected output of the method
+        """
+        self.set_and_cache_xdmod_variables(varhash)
+        got = xdmod.generate_xdmod_orglevel_hierarchy_setup()
+
+#        # For debugging
+#        sys.stderr.write('[TPTEST] generate_xdmod_orglevel_hierarchy_setup returned:\n---\n')
+#        sys.stderr.write('{}\n'.format(got))
+#        sys.stderr.write('[TPTEST] ---\n')
+
+        self.restore_cached_xdmod_variables(varhash)
+        self.assertEqual(got, expected)
+        return
+
+    def do_hierarchy_csv_test(self, varhash, expected):
+        """Do a test of generate_xdmod_org_hierarchy method.
+
+        Expects a varhash giving desired xdmod settings (e.g. 
+        XDMOD_MAX_HIERARCHY_TIERS, XDMOD_ALLOCATION/PROJECT_IN_HIERARCHY)
+        and the expected output of the method
+        """
+        self.set_and_cache_xdmod_variables(varhash)
+        got = xdmod.generate_xdmod_org_hierarchy()
+
+        # For debugging
+        sys.stderr.write('[TPTEST] generate_xdmod_org_hierarchy returned:\n---\n')
+        sys.stderr.write('[\n')
+        for x in got:
+            sys.stderr.write('{}\n'.format(x))
+        sys.stderr.write(']\n[TPTEST] ---\n')
+
+        self.restore_cached_xdmod_variables(varhash)
+        self.assertEqual(got, expected)
+        return
+
+
+    ########################################################################
+    #                       Tests
+    ########################################################################
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_noalloc_max3(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=3, no proj/allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+                EXPECTED_UNIV_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_alloc_max3(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=3, no proj, w allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                'allocation',
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_proj_alloc_max3(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=3, w proj, allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            }
+        expected = [
+                'allocation',
+                'project',
+                EXPECTED_DEPT_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_proj_noalloc_max3(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=3, no alloc, w projs
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            }
+        expected = [
+                'project',
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_noalloc_max5(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=5, no proj/allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 5,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+                EXPECTED_UNIV_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_noalloc_max2(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=2, no proj/allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 2,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_noalloc_max1(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=1, no proj/allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 1,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                EXPECTED_DEPT_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_proj_noalloc_max5(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=5, no allocs w proj.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 5,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            }
+        expected = [
+                'project',
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+                EXPECTED_UNIV_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_proj_alloc_max5(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=5, w proj/allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 5,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            }
+        expected = [
+                'allocation',
+                'project',
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+                EXPECTED_UNIV_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_xdmod_orglevel_hierarchy_list_noproj_alloc_max5(self):
+        """Test xdmod_orglevel_hierarchy_list: max levels=5, no proj w allocs.
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 5,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = [
+                'allocation',
+                EXPECTED_DEPT_ORGLEV,
+                EXPECTED_COLL_ORGLEV,
+                EXPECTED_UNIV_ORGLEV,
+            ]
+
+        self.do_xdmod_orglevel_hierarchy_list_test(varhash, expected)
+        return
+
+    def test_hierarchy_json_noalloc_noproj(self):
+        """Test generate_xdmod_orglevel_hierarchy_setup, no proj/alloc
+        """
+        varhash = {
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = {
+                'bottom_level_info': 'Department',
+                'bottom_level_label': 'Department',
+                'middle_level_info': 'College',
+                'middle_level_label': 'College',
+                'top_level_info': 'University',
+                'top_level_label': 'University',
+            }
+
+        self.do_hierarchy_json_test(varhash, expected)
+        return
+
+    def test_hierarchy_json_alloc_noproj(self):
+        """Test generate_xdmod_orglevel_hierarchy_setup, no proj w alloc
+        """
+        varhash = {
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            'XDMOD_ALLOCATION_HIERARCHY_LABEL': 'Allocation',
+            'XDMOD_ALLOCATION_HIERARCHY_INFO': 'One or more Allocations',
+            }
+        expected = {
+                'bottom_level_info': 'One or more Allocations',
+                'bottom_level_label': 'Allocation',
+                'middle_level_info': 'Department',
+                'middle_level_label': 'Department',
+                'top_level_info': 'College',
+                'top_level_label': 'College',
+            }
+
+        self.do_hierarchy_json_test(varhash, expected)
+        return
+
+    def test_hierarchy_json_noalloc_proj(self):
+        """Test generate_xdmod_orglevel_hierarchy_setup, no alloc w proj
+        """
+        varhash = {
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_HIERARCHY_LABEL': 'Project',
+            'XDMOD_PROJECT_HIERARCHY_INFO': 'All Allocations in Project',
+            }
+        expected = {
+                'bottom_level_info': 'All Allocations in Project',
+                'bottom_level_label': 'Project',
+                'middle_level_info': 'Department',
+                'middle_level_label': 'Department',
+                'top_level_info': 'College',
+                'top_level_label': 'College',
+            }
+
+        self.do_hierarchy_json_test(varhash, expected)
+        return
+
+    def test_hierarchy_json_alloc_proj(self):
+        """Test generate_xdmod_orglevel_hierarchy_setup, w proj/alloc
+        """
+        varhash = {
+            'XDMOD_ALLOCATION_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            'XDMOD_ALLOCATION_HIERARCHY_LABEL': 'Allocation',
+            'XDMOD_ALLOCATION_HIERARCHY_INFO': 'Allocations',
+            'XDMOD_PROJECT_HIERARCHY_LABEL': 'Project',
+            'XDMOD_PROJECT_HIERARCHY_INFO': 'Allocations in Project',
+            }
+        expected = {
+                'bottom_level_info': 'Allocations',
+                'bottom_level_label': 'Allocation',
+                'middle_level_info': 'Allocations in Project',
+                'middle_level_label': 'Project',
+                'top_level_info': 'Department',
+                'top_level_label': 'Department',
+            }
+
+        self.do_hierarchy_json_test(varhash, expected)
+        return
+
+    def test_hierarchy_csv_noproj_noalloc(self):
+        """Test generate_xdmod_org_hierarchy: no proj/alloc
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': False,
+            }
+        expected = (EXPECTED_ORGLIST_UNIV +
+            EXPECTED_ORGLIST_COLL +
+            EXPECTED_ORGLIST_DEPT)
+
+        self.do_hierarchy_csv_test(varhash, expected)
+        return
+
+    def test_hierarchy_csv_proj_noalloc_defmode(self):
+        """Test generate_xdmod_org_hierarchy: proj but no alloc
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_HIERARCHY_CODE_PREFIX': 'proj-',
+            'XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX': '-prj',
+            }
+        
+        tmp_coll = [ (x[0], x[1], None) for x in EXPECTED_ORGLIST_COLL ]
+        expected = (tmp_coll +
+            EXPECTED_ORGLIST_DEPT +
+            EXPECTED_ORGLIST_PROJ_NOALLOC_PI)
+
+        self.do_hierarchy_csv_test(varhash, expected)
+        return
+
+    def test_hierarchy_csv_proj_noalloc_pimode(self):
+        """Test generate_xdmod_org_hierarchy: proj but no alloc
+        """
+        varhash = {
+            'XDMOD_MAX_HIERARCHY_TIERS': 3,
+            'XDMOD_ALLOCATION_IN_HIERARCHY': False,
+            'XDMOD_PROJECT_IN_HIERARCHY': True,
+            'XDMOD_PROJECT_HIERARCHY_CODE_MODE': 'pi_username',
+            'XDMOD_PROJECT_HIERARCHY_CODE_PREFIX': 'proj-',
+            'XDMOD_PROJECT_HIERARCHY_CODE_SUFFIX': '-prj',
+            }
+        
+        tmp_coll = [ (x[0], x[1], None) for x in EXPECTED_ORGLIST_COLL ]
+        expected = (tmp_coll +
+            EXPECTED_ORGLIST_DEPT +
+            EXPECTED_ORGLIST_PROJ_NOALLOC_PI)
+
+        self.do_hierarchy_csv_test(varhash, expected)
+        return
+
+
+
