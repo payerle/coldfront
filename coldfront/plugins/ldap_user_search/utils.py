@@ -5,6 +5,7 @@ import ldap.filter
 from coldfront.core.user.utils import UserSearch
 from coldfront.core.utils.common import import_from_settings
 from ldap3 import Connection, Server, Tls, get_config_parameter, set_config_parameter, SASL, AUTO_BIND_TLS_BEFORE_BIND
+import ssl
 
 logger = logging.getLogger(__name__)
 
