@@ -39,11 +39,11 @@ class LDAPUserSearch(UserSearch):
         tls = None
         if self.LDAP_USE_TLS:
             ldap_cert_validate_mode = ssl.CERT_NONE
-            if self.LDAP_CERT_VALIDATE_MODE == 'none'::
+            if self.LDAP_CERT_VALIDATE_MODE == 'none':
                 ldap_cert_validate_mode = ssl.CERT_NONE
-            elif self.LDAP_CERT_VALIDATE_MODE == 'optional'::
+            elif self.LDAP_CERT_VALIDATE_MODE == 'optional':
                 ldap_cert_validate_mode = ssl.CERT_OPTIONAL
-            elif self.LDAP_CERT_VALIDATE_MODE == 'required'::
+            elif self.LDAP_CERT_VALIDATE_MODE == 'required':
                 ldap_cert_validate_mode = ssl.CERT_REQUIRED
 
             tls = Tls(
